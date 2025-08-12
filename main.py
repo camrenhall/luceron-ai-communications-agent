@@ -167,9 +167,10 @@ class SendEmailTool(BaseTool):
     """Tool to send reminder emails"""
     name: str = "send_email"
     description: str = """Send reminder email to client. Input: JSON with recipient_email, subject, body, case_id"""
+    dry_run: bool = False
     
-    def __init__(self, dry_run: bool = False):
-        super().__init__()
+    def __init__(self, dry_run: bool = False, **kwargs):
+        super().__init__(**kwargs)
         self.dry_run = dry_run
     
     def _run(self, email_data: str) -> str:

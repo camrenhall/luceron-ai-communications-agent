@@ -20,6 +20,9 @@ from langchain.tools import BaseTool
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.outputs import LLMResult
+from langchain_core.agents import AgentAction, AgentFinish
 
 # Configure logging
 logging.basicConfig(
@@ -244,23 +247,81 @@ Execute systematically and thoroughly to ensure no cases are overlooked."""),
         return_intermediate_steps=True
     )
 
-# Streaming support
+# Streaming support with real LangChain callbacks
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.outputs import LLMResult
+from langchain_core.agents import AgentAction, AgentFinish
+
+class StreamingCallbackHandler(BaseCallbackHandler):
+    """Captures real LangChain agent reasoning steps"""
+    
+    def __init__(self, stream_queue):
+        self.stream_queue = stream_queue
+    
+    async def on_llm_start(self, serialized, prompts, **kwargs):
+        """Called when LLM starts processing"""
+        await self.stream_queue.put({
+            'type': 'thinking', 
+            'message': 'Agent is analyzing the request and planning actions...'
+        })
+    
+    async def on_llm_end(self, response: LLMResult, **kwargs):
+        """Called when LLM finishes processing"""
+        if response.generations and response.generations[0]:
+            text = response.generations[0][0].text
+            await self.stream_queue.put({
+                'type': 'llm_response', 
+                'message': f'Agent reasoning: {text[:200]}...' if len(text) > 200 else text
+            })
+    
+    async def on_tool_start(self, serialized, input_str, **kwargs):
+        """Called when agent starts using a tool"""
+        tool_name = serialized.get('name', 'Unknown tool')
+        await self.stream_queue.put({
+            'type': 'tool_start',
+            'tool': tool_name,
+            'message': f'Executing {tool_name}: {str(input_str)[:100]}...'
+        })
+    
+    async def on_tool_end(self, output, **kwargs):
+        """Called when tool execution completes"""
+        await self.stream_queue.put({
+            'type': 'tool_end',
+            'message': f'Tool completed: {str(output)[:200]}...' if len(str(output)) > 200 else str(output)
+        })
+    
+    async def on_agent_action(self, action: AgentAction, **kwargs):
+        """Called when agent decides on an action"""
+        await self.stream_queue.put({
+            'type': 'agent_action',
+            'tool': action.tool,
+            'message': f'Agent decided to use {action.tool}. Reasoning: {action.log[:300]}...'
+        })
+    
+    async def on_agent_finish(self, finish: AgentFinish, **kwargs):
+        """Called when agent completes all actions"""
+        await self.stream_queue.put({
+            'type': 'agent_finish',
+            'message': 'Agent has completed all planned actions'
+        })
+
 class AgentStreamHandler:
-    """Handles streaming of agent execution steps"""
+    """Handles streaming of agent execution with real callbacks"""
     
     def __init__(self):
         self.stream_queue = asyncio.Queue()
-    
-    async def stream_callback(self, data: Dict):
-        """Queue streaming data"""
-        await self.stream_queue.put(data)
+        self.callback_handler = StreamingCallbackHandler(self.stream_queue)
     
     async def execute_with_streaming(self, agent: AgentExecutor, input_message: str):
-        """Execute agent with streaming callbacks"""
+        """Execute agent with real streaming callbacks"""
         
         async def run_agent():
             try:
-                result = await agent.ainvoke({"input": input_message})
+                # Execute with callback handler to capture reasoning
+                result = await agent.ainvoke(
+                    {"input": input_message}, 
+                    config={"callbacks": [self.callback_handler]}
+                )
                 await self.stream_queue.put({'type': 'execution_complete', 'result': result})
             except Exception as e:
                 await self.stream_queue.put({'type': 'execution_error', 'error': str(e)})
@@ -268,13 +329,12 @@ class AgentStreamHandler:
         # Start agent execution
         agent_task = asyncio.create_task(run_agent())
         
-        # Stream progress updates
+        # Stream the real reasoning steps
         while True:
             try:
-                data = await asyncio.wait_for(self.stream_queue.get(), timeout=2.0)
+                data = await asyncio.wait_for(self.stream_queue.get(), timeout=3.0)
                 
                 if data['type'] == 'execution_complete':
-                    # Yield the final result and break
                     yield {'type': 'agent_result', 'result': data['result']}
                     break
                 elif data['type'] == 'execution_error':
@@ -286,8 +346,8 @@ class AgentStreamHandler:
             except asyncio.TimeoutError:
                 if agent_task.done():
                     break
-                # Send keepalive
-                yield {'type': 'status', 'message': 'Agent processing...'}
+                # Send less frequent keepalives
+                yield {'type': 'status', 'message': 'Processing...'}
                 continue
 
 # FastAPI application

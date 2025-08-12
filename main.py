@@ -1,20 +1,20 @@
 """
-Production Client Communications Agent
-AI-powered client reminder system for Family Law document discovery
+Client Communications Agent - Refactored
+AI-powered client reminder system that orchestrates backend API calls
 """
 
 import os
 import logging
 import json
 import asyncio
-from datetime import datetime, timedelta
-from typing import Optional, Dict, List
+from datetime import datetime
+from typing import Dict
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import asyncpg
+import httpx
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.tools import BaseTool
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -33,18 +33,18 @@ logger = logging.getLogger(__name__)
 
 # Environment configuration
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-DATABASE_URL = os.getenv("DATABASE_URL")
+BACKEND_URL = os.getenv("BACKEND_URL")
 PORT = int(os.getenv("PORT", 8080))
 
 if not ANTHROPIC_API_KEY:
     raise ValueError("ANTHROPIC_API_KEY environment variable is required")
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is required")
+if not BACKEND_URL:
+    raise ValueError("BACKEND_URL environment variable is required")
 
-# Global database pool
-db_pool = None
+# HTTP client for backend calls
+http_client = None
 
-# Request/Response models
+# Request models
 class ChatRequest(BaseModel):
     message: str
     dry_run: bool = False
@@ -57,35 +57,23 @@ class ProcessRemindersResponse(BaseModel):
     cases_processed: int
     summary: str
 
-# Database operations
-async def init_database():
-    """Initialize database connection pool"""
-    global db_pool
-    try:
-        db_pool = await asyncpg.create_pool(
-            DATABASE_URL,
-            min_size=2,
-            max_size=10,
-            command_timeout=60
-        )
-        # Test connection
-        async with db_pool.acquire() as conn:
-            await conn.fetchval("SELECT 1")
-        logger.info("Database connection pool initialized")
-    except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
-        raise
+# HTTP client management
+async def init_http_client():
+    """Initialize HTTP client"""
+    global http_client
+    http_client = httpx.AsyncClient(timeout=30.0)
+    logger.info("HTTP client initialized")
 
-async def close_database():
-    """Close database connection pool"""
-    global db_pool
-    if db_pool:
-        await db_pool.close()
-        logger.info("Database connections closed")
+async def close_http_client():
+    """Close HTTP client"""
+    global http_client
+    if http_client:
+        await http_client.aclose()
+        logger.info("HTTP client closed")
 
-# LangChain Tools
+# LangChain Tools that call backend APIs
 class CheckCaseStatusTool(BaseTool):
-    """Tool to check cases needing reminder communications"""
+    """Tool to check cases needing reminder communications via backend API"""
     name: str = "check_case_status"
     description: str = "Check for cases awaiting documents that haven't been contacted in the last 3 days. Returns list of cases requiring reminder emails."
     
@@ -94,47 +82,27 @@ class CheckCaseStatusTool(BaseTool):
     
     async def _arun(self, query: str = "") -> str:
         try:
-            async with db_pool.acquire() as conn:
-                cutoff_date = datetime.now() - timedelta(days=3)
-                
-                query_sql = """
-                SELECT case_id, client_email, client_name, status, 
-                       last_communication_date, documents_requested
-                FROM cases 
-                WHERE status = 'awaiting_documents' 
-                AND (last_communication_date IS NULL OR last_communication_date < $1)
-                ORDER BY last_communication_date ASC NULLS FIRST
-                LIMIT 20
-                """
-                
-                rows = await conn.fetch(query_sql, cutoff_date)
-                
-                cases = []
-                for row in rows:
-                    cases.append({
-                        "case_id": row['case_id'],
-                        "client_email": row['client_email'],
-                        "client_name": row['client_name'],
-                        "status": row['status'],
-                        "last_communication_date": row['last_communication_date'].isoformat() if row['last_communication_date'] else None,
-                        "documents_requested": row['documents_requested']
-                    })
-                
-                result = {
-                    "found_cases": len(cases),
-                    "cases": cases
-                }
-                
-                logger.info(f"Found {len(cases)} cases requiring reminders")
-                return json.dumps(result, indent=2)
-                
+            logger.info("🔍 CheckCaseStatus: Calling backend API...")
+            
+            response = await http_client.get(f"{BACKEND_URL}/api/cases/pending-reminders")
+            response.raise_for_status()
+            
+            data = response.json()
+            logger.info(f"🔍 CheckCaseStatus: Backend returned {data['found_cases']} cases")
+            
+            return json.dumps(data, indent=2)
+            
+        except httpx.HTTPError as e:
+            error_msg = f"Backend API error: {str(e)}"
+            logger.error(f"🔍 CheckCaseStatus ERROR: {error_msg}")
+            return json.dumps({"error": error_msg})
         except Exception as e:
-            error_msg = f"Database query failed: {str(e)}"
-            logger.error(error_msg)
+            error_msg = f"Unexpected error: {str(e)}"
+            logger.error(f"🔍 CheckCaseStatus ERROR: {error_msg}")
             return json.dumps({"error": error_msg})
 
 class SendEmailTool(BaseTool):
-    """Tool to send reminder emails to clients"""
+    """Tool to send reminder emails to clients via backend API"""
     name: str = "send_email"
     description: str = "Send reminder email to client. Input: JSON with recipient_email, subject, body, case_id"
     dry_run: bool = False
@@ -148,110 +116,59 @@ class SendEmailTool(BaseTool):
     
     async def _arun(self, email_data: str) -> str:
         try:
+            logger.info("📧 SendEmail: Parsing email data...")
             data = json.loads(email_data)
             required_fields = ["recipient_email", "subject", "body", "case_id"]
             
             for field in required_fields:
                 if field not in data:
-                    return f"Error: Missing required field '{field}'"
+                    error_msg = f"Missing required field '{field}'"
+                    logger.error(f"📧 SendEmail ERROR: {error_msg}")
+                    return f"Error: {error_msg}"
             
-            recipient = data["recipient_email"]
-            subject = data["subject"]
-            body = data["body"]
-            case_id = data["case_id"]
-            
-            # Log email content (replace with actual email service in production)
             if self.dry_run:
-                logger.info(f"[DRY RUN] Email queued for case {case_id} to {recipient}")
-            else:
-                logger.info(f"Sending email for case {case_id} to {recipient}")
-                logger.info(f"Subject: {subject}")
-                logger.info(f"Body preview: {body[:200]}...")
-                # TODO: Integrate with email service (SendGrid, AWS SES, etc.)
+                logger.info(f"📧 SendEmail: [DRY RUN] Email queued for case {data['case_id']}")
+                return f"[DRY RUN] Email queued for case {data['case_id']} to {data['recipient_email']}"
             
-            # Update database communication timestamp
-            if not self.dry_run:
-                try:
-                    async with db_pool.acquire() as conn:
-                        await conn.execute(
-                            "UPDATE cases SET last_communication_date = $1 WHERE case_id = $2",
-                            datetime.now(),
-                            case_id
-                        )
-                    logger.info(f"Updated communication timestamp for case {case_id}")
-                except Exception as e:
-                    logger.error(f"Failed to update database for case {case_id}: {e}")
+            logger.info(f"📧 SendEmail: Calling backend API for case {data['case_id']}")
             
-            return f"Email {'queued' if self.dry_run else 'sent'} successfully to {recipient} for case {case_id}"
+            # Call backend email API
+            response = await http_client.post(
+                f"{BACKEND_URL}/api/send-email",
+                json=data
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.info(f"📧 SendEmail: Backend response - Message ID: {result['message_id']}")
+            
+            # Update case communication date
+            update_response = await http_client.put(
+                f"{BACKEND_URL}/api/cases/{data['case_id']}/communication-date",
+                json={
+                    "case_id": data['case_id'],
+                    "last_communication_date": datetime.now().isoformat()
+                }
+            )
+            update_response.raise_for_status()
+            
+            logger.info(f"📧 SendEmail: Successfully sent email for case {data['case_id']}")
+            return f"Email sent successfully to {data['recipient_email']} for case {data['case_id']} (Message ID: {result['message_id']})"
             
         except json.JSONDecodeError as e:
-            return f"Error: Invalid JSON format - {str(e)}"
+            error_msg = f"Invalid JSON format - {str(e)}"
+            logger.error(f"📧 SendEmail JSON ERROR: {error_msg}")
+            return f"Error: {error_msg}"
+        except httpx.HTTPError as e:
+            error_msg = f"Backend API error - {str(e)}"
+            logger.error(f"📧 SendEmail API ERROR: {error_msg}")
+            return f"Error: {error_msg}"
         except Exception as e:
-            return f"Error: Email processing failed - {str(e)}"
-
-# Agent creation
-def create_agent(dry_run: bool = False) -> AgentExecutor:
-    """Create LangChain agent with communication tools"""
-    
-    llm = ChatAnthropic(
-        model="claude-3-5-sonnet-20241022",
-        api_key=ANTHROPIC_API_KEY,
-        temperature=0.1
-    )
-    
-    tools = [
-        CheckCaseStatusTool(),
-        SendEmailTool(dry_run=dry_run)
-    ]
-    
-    prompt = ChatPromptTemplate.from_messages([
-        SystemMessage(content="""You are a Client Communications Agent for a Family Law firm specializing in financial discovery.
-
-CORE RESPONSIBILITY:
-Check for cases requiring document reminders and send professional, empathetic communication to clients.
-
-WORKFLOW:
-1. Use check_case_status to identify cases needing attention
-2. For each case, analyze the specific documents required
-3. Compose personalized, professional reminder emails using send_email
-4. Ensure all identified cases receive appropriate communication
-
-EMAIL REQUIREMENTS:
-- Professional yet warm and understanding tone
-- Acknowledge the emotional difficulty of family law proceedings
-- Clearly specify the exact documents needed
-- Provide reasonable timeframe for document submission
-- Offer assistance and support
-- Include contact information for questions
-
-DECISION MAKING:
-- Process ALL cases returned by check_case_status
-- Personalize each email based on client name and document requirements
-- Maintain consistency in professional standards while adapting tone appropriately
-- Prioritize clarity and empathy in all communications
-
-Execute systematically and thoroughly to ensure no cases are overlooked."""),
-        MessagesPlaceholder("chat_history", optional=True),
-        ("human", "{input}"),
-        MessagesPlaceholder("agent_scratchpad")
-    ])
-    
-    agent = create_tool_calling_agent(llm, tools, prompt)
-    
-    return AgentExecutor(
-        agent=agent,
-        tools=tools,
-        verbose=True,
-        handle_parsing_errors=True,
-        max_iterations=15,
-        return_intermediate_steps=True
-    )
+            error_msg = f"Unexpected error - {str(e)}"
+            logger.error(f"📧 SendEmail ERROR: {error_msg}")
+            return f"Error: {error_msg}"
 
 # Streaming support with real LangChain callbacks
-from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.outputs import LLMResult
-from langchain_core.agents import AgentAction, AgentFinish
-
 class StreamingCallbackHandler(BaseCallbackHandler):
     """Captures real LangChain agent reasoning steps"""
     
@@ -317,7 +234,6 @@ class AgentStreamHandler:
         
         async def run_agent():
             try:
-                # Execute with callback handler to capture reasoning
                 result = await agent.ainvoke(
                     {"input": input_message}, 
                     config={"callbacks": [self.callback_handler]}
@@ -346,18 +262,75 @@ class AgentStreamHandler:
             except asyncio.TimeoutError:
                 if agent_task.done():
                     break
-                # Send less frequent keepalives
                 yield {'type': 'status', 'message': 'Processing...'}
                 continue
+
+# Agent creation
+def create_agent(dry_run: bool = False) -> AgentExecutor:
+    """Create LangChain agent with API tools"""
+    
+    llm = ChatAnthropic(
+        model="claude-3-5-sonnet-20241022",
+        api_key=ANTHROPIC_API_KEY,
+        temperature=0.1
+    )
+    
+    tools = [
+        CheckCaseStatusTool(),
+        SendEmailTool(dry_run=dry_run)
+    ]
+    
+    prompt = ChatPromptTemplate.from_messages([
+        SystemMessage(content="""You are a Client Communications Agent for a Family Law firm specializing in financial discovery.
+
+CORE RESPONSIBILITY:
+Check for cases requiring document reminders and send professional, empathetic communication to clients.
+
+WORKFLOW:
+1. Use check_case_status to identify cases needing attention
+2. For each case, analyze the specific documents required
+3. Compose personalized, professional reminder emails using send_email
+4. Ensure all identified cases receive appropriate communication
+
+EMAIL REQUIREMENTS:
+- Professional yet warm and understanding tone
+- Acknowledge the emotional difficulty of family law proceedings
+- Clearly specify the exact documents needed
+- Provide reasonable timeframe for document submission
+- Offer assistance and support
+- Include contact information for questions
+
+DECISION MAKING:
+- Process ALL cases returned by check_case_status
+- Personalize each email based on client name and document requirements
+- Maintain consistency in professional standards while adapting tone appropriately
+- Prioritize clarity and empathy in all communications
+
+Execute systematically and thoroughly to ensure no cases are overlooked."""),
+        MessagesPlaceholder("chat_history", optional=True),
+        ("human", "{input}"),
+        MessagesPlaceholder("agent_scratchpad")
+    ])
+    
+    agent = create_tool_calling_agent(llm, tools, prompt)
+    
+    return AgentExecutor(
+        agent=agent,
+        tools=tools,
+        verbose=True,
+        handle_parsing_errors=True,
+        max_iterations=15,
+        return_intermediate_steps=True
+    )
 
 # FastAPI application
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    await init_database()
+    await init_http_client()
     yield
     # Shutdown
-    await close_database()
+    await close_http_client()
 
 app = FastAPI(
     title="Client Communications Agent",
@@ -370,15 +343,17 @@ app = FastAPI(
 async def health_check():
     """Service health check"""
     try:
-        async with db_pool.acquire() as conn:
-            await conn.fetchval("SELECT 1")
+        # Test backend connectivity
+        response = await http_client.get(f"{BACKEND_URL}/")
+        response.raise_for_status()
+        
         return {
             "status": "operational",
             "timestamp": datetime.now().isoformat(),
-            "database": "connected"
+            "backend": "connected"
         }
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Service unavailable: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"Backend unavailable: {str(e)}")
 
 @app.post("/chat")
 async def chat_with_agent(request: ChatRequest):

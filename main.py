@@ -269,16 +269,17 @@ class AgentStreamHandler:
         agent_task = asyncio.create_task(run_agent())
         
         # Stream progress updates
-        final_result = None
         while True:
             try:
                 data = await asyncio.wait_for(self.stream_queue.get(), timeout=2.0)
                 
                 if data['type'] == 'execution_complete':
-                    final_result = data['result']
+                    # Yield the final result and break
+                    yield {'type': 'agent_result', 'result': data['result']}
                     break
                 elif data['type'] == 'execution_error':
-                    raise Exception(data['error'])
+                    yield {'type': 'error', 'message': data['error']}
+                    break
                 else:
                     yield data
                     
@@ -288,8 +289,6 @@ class AgentStreamHandler:
                 # Send keepalive
                 yield {'type': 'status', 'message': 'Agent processing...'}
                 continue
-        
-        return final_result
 
 # FastAPI application
 @asynccontextmanager
@@ -332,23 +331,28 @@ async def chat_with_agent(request: ChatRequest):
             
             yield f"data: {json.dumps({'type': 'status', 'message': 'Initializing agent execution'})}\n\n"
             
-            # Execute with streaming
+            # Execute with streaming and capture final result
+            final_result = None
             async for update in stream_handler.execute_with_streaming(agent, request.message):
-                yield f"data: {json.dumps(update)}\n\n"
-            
-            # Get final result
-            result = await agent.ainvoke({"input": request.message})
-            output = result.get("output", "Execution completed")
-            
-            if isinstance(output, list) and output:
-                if isinstance(output[0], dict) and "text" in output[0]:
-                    response_text = output[0]["text"]
+                if update['type'] == 'agent_result':
+                    final_result = update['result']
                 else:
-                    response_text = str(output[0])
-            else:
-                response_text = str(output)
+                    yield f"data: {json.dumps(update)}\n\n"
             
-            yield f"data: {json.dumps({'type': 'final_response', 'response': response_text})}\n\n"
+            # Process and yield final response
+            if final_result:
+                output = final_result.get("output", "Execution completed")
+                
+                if isinstance(output, list) and output:
+                    if isinstance(output[0], dict) and "text" in output[0]:
+                        response_text = output[0]["text"]
+                    else:
+                        response_text = str(output[0])
+                else:
+                    response_text = str(output)
+                
+                yield f"data: {json.dumps({'type': 'final_response', 'response': response_text})}\n\n"
+            
             yield f"data: {json.dumps({'type': 'complete'})}\n\n"
             
         except Exception as e:

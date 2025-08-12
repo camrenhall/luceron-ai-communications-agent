@@ -46,13 +46,19 @@ if not BACKEND_URL:
 # Global HTTP client
 http_client = None
 
-# Workflow State Models
+# Workflow State Models - Updated for consistency
 class WorkflowStatus(str, Enum):
+    # Original statuses
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
     AWAITING_SCHEDULE = "AWAITING_SCHEDULE"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    # Document Analysis Agent statuses (for consistency)
+    PENDING_PLANNING = "PENDING_PLANNING"
+    AWAITING_BATCH_COMPLETION = "AWAITING_BATCH_COMPLETION"
+    SYNTHESIZING_RESULTS = "SYNTHESIZING_RESULTS"
+    NEEDS_HUMAN_REVIEW = "NEEDS_HUMAN_REVIEW"
 
 class ReasoningStep(BaseModel):
     timestamp: datetime
@@ -69,6 +75,10 @@ class WorkflowState(BaseModel):
     initial_prompt: str
     reasoning_chain: List[ReasoningStep]
     scheduled_for: Optional[datetime] = None
+    # Enhanced fields for consistency (Communications Agent will use basic values)
+    document_ids: List[str] = []
+    case_context: Optional[str] = None
+    priority: str = "standard"
     created_at: datetime
     updated_at: datetime
 
@@ -77,6 +87,7 @@ class TriggerWorkflowRequest(BaseModel):
     case_id: Optional[str] = None
     prompt: str = "Execute automated client reminder workflow"
     schedule_for: Optional[datetime] = None
+    priority: str = "standard"
 
 class WorkflowResponse(BaseModel):
     workflow_id: str
@@ -105,12 +116,41 @@ async def close_http_client():
 async def create_workflow_state(state: WorkflowState) -> WorkflowState:
     """Create workflow state via backend API"""
     try:
+        # Convert to format expected by backend
+        workflow_data = {
+            "workflow_id": state.workflow_id,
+            "agent_type": state.agent_type,
+            "case_id": state.case_id,
+            "status": state.status.value,
+            "initial_prompt": state.initial_prompt,
+            "scheduled_for": state.scheduled_for.isoformat() if state.scheduled_for else None,
+            "document_ids": state.document_ids,
+            "case_context": state.case_context,
+            "priority": state.priority
+        }
+        
         response = await http_client.post(
             f"{BACKEND_URL}/api/workflows",
-            json=state.dict()
+            json=workflow_data
         )
         response.raise_for_status()
-        return WorkflowState(**response.json())
+        # Convert to format expected by backend  
+        reasoning_chain = [ReasoningStep(**step) for step in data.get("reasoning_chain", [])]
+        
+        return WorkflowState(
+            workflow_id=data['workflow_id'],
+            agent_type=data['agent_type'],
+            case_id=data.get('case_id'),
+            status=WorkflowStatus(data['status']),
+            initial_prompt=data['initial_prompt'],
+            reasoning_chain=reasoning_chain,
+            scheduled_for=datetime.fromisoformat(data['scheduled_for']) if data.get('scheduled_for') else None,
+            document_ids=data.get('document_ids', []),
+            case_context=data.get('case_context'),
+            priority=data.get('priority', 'standard'),
+            created_at=datetime.fromisoformat(data['created_at']),
+            updated_at=datetime.fromisoformat(data['updated_at'])
+        )
     except Exception as e:
         logger.error(f"Failed to create workflow state: {e}")
         raise
@@ -450,6 +490,7 @@ async def trigger_workflow(request: TriggerWorkflowRequest, background_tasks: Ba
         initial_prompt=request.prompt,
         reasoning_chain=[],
         scheduled_for=request.schedule_for,
+        priority=request.priority,
         created_at=datetime.now(),
         updated_at=datetime.now()
     )
@@ -498,6 +539,7 @@ async def chat_with_agent(request: ChatRequest):
         status=WorkflowStatus.PENDING,
         initial_prompt=request.message,
         reasoning_chain=[],
+        priority="interactive",
         created_at=datetime.now(),
         updated_at=datetime.now()
     )
@@ -542,6 +584,7 @@ async def webhook_case_created(case_data: dict, background_tasks: BackgroundTask
         status=WorkflowStatus.PENDING,
         initial_prompt=f"New case created: {case_data.get('case_id')}. Check if initial client communication is needed.",
         reasoning_chain=[],
+        priority="standard",
         created_at=datetime.now(),
         updated_at=datetime.now()
     )
@@ -563,6 +606,9 @@ async def webhook_documents_uploaded(upload_data: dict, background_tasks: Backgr
         status=WorkflowStatus.PENDING,
         initial_prompt=f"Documents uploaded for case {upload_data.get('case_id')}. Send acknowledgment and check if additional documents needed.",
         reasoning_chain=[],
+        document_ids=upload_data.get('document_ids', []),
+        case_context=f"Document upload acknowledgment for case {upload_data.get('case_id')}",
+        priority="standard",
         created_at=datetime.now(),
         updated_at=datetime.now()
     )

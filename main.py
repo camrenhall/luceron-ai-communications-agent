@@ -25,12 +25,13 @@ logger = logging.getLogger(__name__)
 
 # Environment variables
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-DATABASE_URL = os.getenv("DATABASE_URL")  # Supabase PostgreSQL connection string
+DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Make API key optional for startup debugging
 if not ANTHROPIC_API_KEY:
-    raise ValueError("ANTHROPIC_API_KEY environment variable is required")
+    logger.warning("ANTHROPIC_API_KEY environment variable not set")
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is required")
+    logger.warning("DATABASE_URL environment variable not set")
 
 # Database models
 class CaseRecord(BaseModel):
@@ -57,11 +58,14 @@ async def init_db_pool():
     """Initialize database connection pool"""
     global db_pool
     try:
+        if not DATABASE_URL:
+            logger.warning("DATABASE_URL not set, skipping database initialization")
+            return
         db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
         logger.info("Database connection pool initialized")
     except Exception as e:
         logger.error(f"Failed to initialize database pool: {e}")
-        raise
+        # Don't raise - let the service start without DB for debugging
 
 async def close_db_pool():
     """Close database connection pool"""
@@ -260,6 +264,10 @@ app = FastAPI(
 @app.on_event("startup")
 async def startup_event():
     """Initialize resources on startup"""
+    logger.info("Starting Client Communications Agent...")
+    logger.info(f"PORT: {os.getenv('PORT', 'not set')}")
+    logger.info(f"DATABASE_URL: {'set' if DATABASE_URL else 'not set'}")
+    logger.info(f"ANTHROPIC_API_KEY: {'set' if ANTHROPIC_API_KEY else 'not set'}")
     await init_db_pool()
 
 @app.on_event("shutdown") 
@@ -344,5 +352,10 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    try:
+        port = int(os.getenv("PORT", 8080))
+        logger.info(f"Starting server on port {port}")
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    except Exception as e:
+        logger.error(f"Failed to start server: {e}")
+        raise

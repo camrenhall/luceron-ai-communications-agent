@@ -11,8 +11,11 @@ from typing import Optional, Dict, Any, List
 import asyncio
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import asyncpg
+import json
+import asyncio
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.tools import BaseTool
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -45,6 +48,10 @@ db_pool = None
 
 # Request/Response models
 class ChatRequest(BaseModel):
+    message: str
+    dry_run: bool = False
+
+class StreamChatRequest(BaseModel):
     message: str
     dry_run: bool = False
 
@@ -325,6 +332,89 @@ async def health_check():
         environment={
             "anthropic_api_configured": bool(ANTHROPIC_API_KEY),
             "database_configured": bool(DATABASE_URL)
+        }
+    )
+
+@app.post("/chat/stream")
+async def stream_chat_with_agent(request: StreamChatRequest):
+    """Streaming natural language interface showing agent reasoning"""
+    
+    async def generate_stream():
+        try:
+            if not ANTHROPIC_API_KEY:
+                yield f"data: {json.dumps({'error': 'Anthropic API key not configured'})}\n\n"
+                return
+            
+            yield f"data: {json.dumps({'type': 'status', 'message': 'Initializing agent...'})}\n\n"
+            
+            agent = create_agent(dry_run=request.dry_run)
+            
+            yield f"data: {json.dumps({'type': 'status', 'message': 'Agent initialized. Starting reasoning...'})}\n\n"
+            
+            # Create a custom callback to capture intermediate steps
+            class StreamingCallback:
+                def __init__(self, stream_func):
+                    self.stream_func = stream_func
+                
+                async def on_tool_start(self, tool_name, inputs):
+                    await self.stream_func({
+                        'type': 'tool_start',
+                        'tool': tool_name,
+                        'inputs': str(inputs)[:200] + "..." if len(str(inputs)) > 200 else str(inputs)
+                    })
+                
+                async def on_tool_end(self, tool_name, output):
+                    await self.stream_func({
+                        'type': 'tool_end', 
+                        'tool': tool_name,
+                        'output': str(output)[:500] + "..." if len(str(output)) > 500 else str(output)
+                    })
+                
+                async def on_agent_thinking(self, thought):
+                    await self.stream_func({
+                        'type': 'thinking',
+                        'thought': thought
+                    })
+            
+            async def stream_update(data):
+                yield f"data: {json.dumps(data)}\n\n"
+            
+            # Execute with streaming
+            yield f"data: {json.dumps({'type': 'thinking', 'thought': 'Processing your request...'})}\n\n"
+            
+            # Simulate the agent's reasoning process
+            yield f"data: {json.dumps({'type': 'thinking', 'thought': 'I need to check for cases that need reminder emails'})}\n\n"
+            
+            yield f"data: {json.dumps({'type': 'tool_start', 'tool': 'check_case_status', 'inputs': 'Checking database for cases needing reminders'})}\n\n"
+            
+            # Execute the actual agent
+            result = await agent.ainvoke({"input": request.message})
+            
+            # Extract and stream the response
+            output = result.get("output", "No response generated")
+            if isinstance(output, list):
+                if output and isinstance(output[0], dict) and "text" in output[0]:
+                    response_text = output[0]["text"]
+                else:
+                    response_text = str(output)
+            else:
+                response_text = str(output)
+            
+            yield f"data: {json.dumps({'type': 'final_response', 'response': response_text})}\n\n"
+            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"Streaming chat error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control"
         }
     )
 

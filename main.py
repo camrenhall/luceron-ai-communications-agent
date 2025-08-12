@@ -1,28 +1,27 @@
 """
-Client Communications Agent for Google Cloud Run
-Production-ready implementation following GCP best practices
+Production Client Communications Agent
+AI-powered client reminder system for Family Law document discovery
 """
 
 import os
 import logging
 import json
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
 import asyncio
+from datetime import datetime, timedelta
+from typing import Optional, Dict, List
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import asyncpg
-import json
-import asyncio
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.tools import BaseTool
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage
 
-# Configure logging for Cloud Run
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -34,14 +33,10 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 PORT = int(os.getenv("PORT", 8080))
 
-# Initialize FastAPI with proper metadata
-app = FastAPI(
-    title="Client Communications Agent",
-    description="AI-powered client reminder system for Family Law",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
-)
+if not ANTHROPIC_API_KEY:
+    raise ValueError("ANTHROPIC_API_KEY environment variable is required")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is required")
 
 # Global database pool
 db_pool = None
@@ -51,14 +46,6 @@ class ChatRequest(BaseModel):
     message: str
     dry_run: bool = False
 
-class StreamChatRequest(BaseModel):
-    message: str
-    dry_run: bool = False
-
-class ChatResponse(BaseModel):
-    response: str
-    timestamp: str
-
 class ProcessRemindersRequest(BaseModel):
     dry_run: bool = False
 
@@ -67,41 +54,27 @@ class ProcessRemindersResponse(BaseModel):
     cases_processed: int
     summary: str
 
-class HealthResponse(BaseModel):
-    status: str
-    timestamp: str
-    database: str
-    environment: Dict[str, bool]
-
-# Database functions
+# Database operations
 async def init_database():
-    """Initialize database connection pool with proper error handling"""
+    """Initialize database connection pool"""
     global db_pool
-    
-    if not DATABASE_URL:
-        logger.warning("DATABASE_URL not provided - running in demo mode")
-        return
-        
     try:
         db_pool = await asyncpg.create_pool(
             DATABASE_URL,
-            min_size=1,
-            max_size=5,
+            min_size=2,
+            max_size=10,
             command_timeout=60
         )
-        logger.info("Database connection pool initialized successfully")
-        
         # Test connection
         async with db_pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
-        logger.info("Database connection test successful")
-        
+        logger.info("Database connection pool initialized")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
-        db_pool = None
+        raise
 
 async def close_database():
-    """Clean up database connections"""
+    """Close database connection pool"""
     global db_pool
     if db_pool:
         await db_pool.close()
@@ -109,27 +82,14 @@ async def close_database():
 
 # LangChain Tools
 class CheckCaseStatusTool(BaseTool):
-    """Tool to check cases needing reminders"""
+    """Tool to check cases needing reminder communications"""
     name: str = "check_case_status"
-    description: str = "Check for cases awaiting documents that need reminder emails. No parameters required."
+    description: str = "Check for cases awaiting documents that haven't been contacted in the last 3 days. Returns list of cases requiring reminder emails."
     
     def _run(self, query: str = "") -> str:
         raise NotImplementedError("Use async version")
     
     async def _arun(self, query: str = "") -> str:
-        if not db_pool:
-            return json.dumps({
-                "error": "Database not available",
-                "demo_cases": [
-                    {
-                        "case_id": "DEMO001",
-                        "client_email": "demo@example.com",
-                        "client_name": "Demo Client",
-                        "documents_requested": "Bank statements, Tax returns"
-                    }
-                ]
-            })
-        
         try:
             async with db_pool.acquire() as conn:
                 cutoff_date = datetime.now() - timedelta(days=3)
@@ -141,7 +101,7 @@ class CheckCaseStatusTool(BaseTool):
                 WHERE status = 'awaiting_documents' 
                 AND (last_communication_date IS NULL OR last_communication_date < $1)
                 ORDER BY last_communication_date ASC NULLS FIRST
-                LIMIT 10
+                LIMIT 20
                 """
                 
                 rows = await conn.fetch(query_sql, cutoff_date)
@@ -162,18 +122,18 @@ class CheckCaseStatusTool(BaseTool):
                     "cases": cases
                 }
                 
-                logger.info(f"Found {len(cases)} cases needing reminders")
+                logger.info(f"Found {len(cases)} cases requiring reminders")
                 return json.dumps(result, indent=2)
                 
         except Exception as e:
-            error_msg = f"Error checking cases: {str(e)}"
+            error_msg = f"Database query failed: {str(e)}"
             logger.error(error_msg)
             return json.dumps({"error": error_msg})
 
 class SendEmailTool(BaseTool):
-    """Tool to send reminder emails"""
+    """Tool to send reminder emails to clients"""
     name: str = "send_email"
-    description: str = """Send reminder email to client. Input: JSON with recipient_email, subject, body, case_id"""
+    description: str = "Send reminder email to client. Input: JSON with recipient_email, subject, body, case_id"
     dry_run: bool = False
     
     def __init__(self, dry_run: bool = False, **kwargs):
@@ -190,24 +150,24 @@ class SendEmailTool(BaseTool):
             
             for field in required_fields:
                 if field not in data:
-                    return f"Error: Missing field '{field}'"
+                    return f"Error: Missing required field '{field}'"
             
             recipient = data["recipient_email"]
             subject = data["subject"]
             body = data["body"]
             case_id = data["case_id"]
             
-            # Log email (MVP behavior)
+            # Log email content (replace with actual email service in production)
             if self.dry_run:
-                logger.info(f"[DRY RUN] Email for case {case_id}")
+                logger.info(f"[DRY RUN] Email queued for case {case_id} to {recipient}")
             else:
-                logger.info(f"📧 SENDING EMAIL")
-                logger.info(f"📧 TO: {recipient}")
-                logger.info(f"📧 SUBJECT: {subject}")
-                logger.info(f"📧 BODY: {body[:100]}...")
+                logger.info(f"Sending email for case {case_id} to {recipient}")
+                logger.info(f"Subject: {subject}")
+                logger.info(f"Body preview: {body[:200]}...")
+                # TODO: Integrate with email service (SendGrid, AWS SES, etc.)
             
-            # Update database if available
-            if db_pool and not self.dry_run:
+            # Update database communication timestamp
+            if not self.dry_run:
                 try:
                     async with db_pool.acquire() as conn:
                         await conn.execute(
@@ -215,23 +175,20 @@ class SendEmailTool(BaseTool):
                             datetime.now(),
                             case_id
                         )
-                    logger.info(f"Updated communication date for case {case_id}")
+                    logger.info(f"Updated communication timestamp for case {case_id}")
                 except Exception as e:
-                    logger.error(f"Failed to update database: {e}")
+                    logger.error(f"Failed to update database for case {case_id}: {e}")
             
-            return f"Email {'queued' if self.dry_run else 'sent'} to {recipient} for case {case_id}"
+            return f"Email {'queued' if self.dry_run else 'sent'} successfully to {recipient} for case {case_id}"
             
         except json.JSONDecodeError as e:
-            return f"Error: Invalid JSON - {str(e)}"
+            return f"Error: Invalid JSON format - {str(e)}"
         except Exception as e:
-            return f"Error sending email: {str(e)}"
+            return f"Error: Email processing failed - {str(e)}"
 
 # Agent creation
 def create_agent(dry_run: bool = False) -> AgentExecutor:
-    """Create LangChain agent with tools"""
-    
-    if not ANTHROPIC_API_KEY:
-        raise ValueError("ANTHROPIC_API_KEY is required")
+    """Create LangChain agent with communication tools"""
     
     llm = ChatAnthropic(
         model="claude-3-5-sonnet-20241022",
@@ -245,23 +202,32 @@ def create_agent(dry_run: bool = False) -> AgentExecutor:
     ]
     
     prompt = ChatPromptTemplate.from_messages([
-        SystemMessage(content="""You are a Client Communications Agent for a Family Law firm.
+        SystemMessage(content="""You are a Client Communications Agent for a Family Law firm specializing in financial discovery.
 
-Your job is to check for cases needing document reminders and send professional, empathetic emails.
+CORE RESPONSIBILITY:
+Check for cases requiring document reminders and send professional, empathetic communication to clients.
 
 WORKFLOW:
-1. Use check_case_status to find cases needing reminders
-2. For each case, compose a personalized reminder email
-3. Send emails using send_email tool
+1. Use check_case_status to identify cases needing attention
+2. For each case, analyze the specific documents required
+3. Compose personalized, professional reminder emails using send_email
+4. Ensure all identified cases receive appropriate communication
 
-EMAIL STYLE:
-- Professional but warm
-- Acknowledge the difficulty of the situation
-- Clearly state what documents are needed
-- Offer assistance if they have questions
-- Be understanding about family law matters
+EMAIL REQUIREMENTS:
+- Professional yet warm and understanding tone
+- Acknowledge the emotional difficulty of family law proceedings
+- Clearly specify the exact documents needed
+- Provide reasonable timeframe for document submission
+- Offer assistance and support
+- Include contact information for questions
 
-Always process all cases found by check_case_status."""),
+DECISION MAKING:
+- Process ALL cases returned by check_case_status
+- Personalize each email based on client name and document requirements
+- Maintain consistency in professional standards while adapting tone appropriately
+- Prioritize clarity and empathy in all communications
+
+Execute systematically and thoroughly to ensure no cases are overlooked."""),
         MessagesPlaceholder("chat_history", optional=True),
         ("human", "{input}"),
         MessagesPlaceholder("agent_scratchpad")
@@ -274,129 +240,111 @@ Always process all cases found by check_case_status."""),
         tools=tools,
         verbose=True,
         handle_parsing_errors=True,
-        max_iterations=10
+        max_iterations=15,
+        return_intermediate_steps=True
     )
 
-# FastAPI event handlers
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on startup"""
-    logger.info("Starting Client Communications Agent")
-    logger.info(f"PORT: {PORT}")
-    logger.info(f"Database: {'configured' if DATABASE_URL else 'not configured'}")
-    logger.info(f"Anthropic API: {'configured' if ANTHROPIC_API_KEY else 'not configured'}")
+# Streaming support
+class AgentStreamHandler:
+    """Handles streaming of agent execution steps"""
     
-    await init_database()
-    logger.info("Startup complete")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up on shutdown"""
-    await close_database()
-    logger.info("Shutdown complete")
-
-# API endpoints
-@app.get("/", response_model=HealthResponse)
-async def root():
-    """Health check endpoint"""
-    return HealthResponse(
-        status="operational",
-        timestamp=datetime.now().isoformat(),
-        database="connected" if db_pool else "not configured",
-        environment={
-            "anthropic_api_configured": bool(ANTHROPIC_API_KEY),
-            "database_configured": bool(DATABASE_URL)
-        }
-    )
-
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """Detailed health check"""
-    database_status = "not configured"
+    def __init__(self):
+        self.stream_queue = asyncio.Queue()
     
-    if DATABASE_URL:
-        if db_pool:
+    async def stream_callback(self, data: Dict):
+        """Queue streaming data"""
+        await self.stream_queue.put(data)
+    
+    async def execute_with_streaming(self, agent: AgentExecutor, input_message: str):
+        """Execute agent with streaming callbacks"""
+        
+        async def run_agent():
             try:
-                async with db_pool.acquire() as conn:
-                    await conn.fetchval("SELECT 1")
-                database_status = "connected"
+                result = await agent.ainvoke({"input": input_message})
+                await self.stream_queue.put({'type': 'execution_complete', 'result': result})
             except Exception as e:
-                database_status = f"error: {str(e)}"
-        else:
-            database_status = "not connected"
-    
-    return HealthResponse(
-        status="healthy" if database_status in ["connected", "not configured"] else "unhealthy",
-        timestamp=datetime.now().isoformat(),
-        database=database_status,
-        environment={
-            "anthropic_api_configured": bool(ANTHROPIC_API_KEY),
-            "database_configured": bool(DATABASE_URL)
-        }
-    )
+                await self.stream_queue.put({'type': 'execution_error', 'error': str(e)})
+        
+        # Start agent execution
+        agent_task = asyncio.create_task(run_agent())
+        
+        # Stream progress updates
+        final_result = None
+        while True:
+            try:
+                data = await asyncio.wait_for(self.stream_queue.get(), timeout=2.0)
+                
+                if data['type'] == 'execution_complete':
+                    final_result = data['result']
+                    break
+                elif data['type'] == 'execution_error':
+                    raise Exception(data['error'])
+                else:
+                    yield data
+                    
+            except asyncio.TimeoutError:
+                if agent_task.done():
+                    break
+                # Send keepalive
+                yield {'type': 'status', 'message': 'Agent processing...'}
+                continue
+        
+        return final_result
 
-@app.post("/chat/stream")
-async def stream_chat_with_agent(request: StreamChatRequest):
-    """Streaming natural language interface showing agent reasoning"""
+# FastAPI application
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    await init_database()
+    yield
+    # Shutdown
+    await close_database()
+
+app = FastAPI(
+    title="Client Communications Agent",
+    description="AI-powered client reminder system for Family Law",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+@app.get("/")
+async def health_check():
+    """Service health check"""
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        return {
+            "status": "operational",
+            "timestamp": datetime.now().isoformat(),
+            "database": "connected"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Service unavailable: {str(e)}")
+
+@app.post("/chat")
+async def chat_with_agent(request: ChatRequest):
+    """Streaming natural language interface for agent interaction"""
     
     async def generate_stream():
         try:
-            if not ANTHROPIC_API_KEY:
-                yield f"data: {json.dumps({'error': 'Anthropic API key not configured'})}\n\n"
-                return
-            
-            yield f"data: {json.dumps({'type': 'status', 'message': 'Initializing agent...'})}\n\n"
-            
+            stream_handler = AgentStreamHandler()
             agent = create_agent(dry_run=request.dry_run)
             
-            yield f"data: {json.dumps({'type': 'status', 'message': 'Agent initialized. Starting reasoning...'})}\n\n"
-            
-            # Create a custom callback to capture intermediate steps
-            class StreamingCallback:
-                def __init__(self, stream_func):
-                    self.stream_func = stream_func
-                
-                async def on_tool_start(self, tool_name, inputs):
-                    await self.stream_func({
-                        'type': 'tool_start',
-                        'tool': tool_name,
-                        'inputs': str(inputs)[:200] + "..." if len(str(inputs)) > 200 else str(inputs)
-                    })
-                
-                async def on_tool_end(self, tool_name, output):
-                    await self.stream_func({
-                        'type': 'tool_end', 
-                        'tool': tool_name,
-                        'output': str(output)[:500] + "..." if len(str(output)) > 500 else str(output)
-                    })
-                
-                async def on_agent_thinking(self, thought):
-                    await self.stream_func({
-                        'type': 'thinking',
-                        'thought': thought
-                    })
-            
-            async def stream_update(data):
-                yield f"data: {json.dumps(data)}\n\n"
+            yield f"data: {json.dumps({'type': 'status', 'message': 'Initializing agent execution'})}\n\n"
             
             # Execute with streaming
-            yield f"data: {json.dumps({'type': 'thinking', 'thought': 'Processing your request...'})}\n\n"
+            async for update in stream_handler.execute_with_streaming(agent, request.message):
+                yield f"data: {json.dumps(update)}\n\n"
             
-            # Simulate the agent's reasoning process
-            yield f"data: {json.dumps({'type': 'thinking', 'thought': 'I need to check for cases that need reminder emails'})}\n\n"
-            
-            yield f"data: {json.dumps({'type': 'tool_start', 'tool': 'check_case_status', 'inputs': 'Checking database for cases needing reminders'})}\n\n"
-            
-            # Execute the actual agent
+            # Get final result
             result = await agent.ainvoke({"input": request.message})
+            output = result.get("output", "Execution completed")
             
-            # Extract and stream the response
-            output = result.get("output", "No response generated")
-            if isinstance(output, list):
-                if output and isinstance(output[0], dict) and "text" in output[0]:
+            if isinstance(output, list) and output:
+                if isinstance(output[0], dict) and "text" in output[0]:
                     response_text = output[0]["text"]
                 else:
-                    response_text = str(output)
+                    response_text = str(output[0])
             else:
                 response_text = str(output)
             
@@ -404,7 +352,7 @@ async def stream_chat_with_agent(request: StreamChatRequest):
             yield f"data: {json.dumps({'type': 'complete'})}\n\n"
             
         except Exception as e:
-            logger.error(f"Streaming chat error: {e}")
+            logger.error(f"Agent execution failed: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
     
     return StreamingResponse(
@@ -412,69 +360,45 @@ async def stream_chat_with_agent(request: StreamChatRequest):
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control"
+            "Connection": "keep-alive"
         }
     )
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat_with_agent(request: ChatRequest):
-    """Natural language interface with the agent"""
-    try:
-        if not ANTHROPIC_API_KEY:
-            raise HTTPException(status_code=500, detail="Anthropic API key not configured")
-        
-        agent = create_agent(dry_run=request.dry_run)
-        result = await agent.ainvoke({"input": request.message})
-        
-        # Extract the actual response text from the agent result
-        output = result.get("output", "No response generated")
-        if isinstance(output, list):
-            # If output is a list of message objects, extract the text
-            if output and isinstance(output[0], dict) and "text" in output[0]:
-                response_text = output[0]["text"]
-            else:
-                response_text = str(output)
-        else:
-            response_text = str(output)
-        
-        return ChatResponse(
-            response=response_text,
-            timestamp=datetime.now().isoformat()
-        )
-        
-    except Exception as e:
-        logger.error(f"Chat error: {e}")
-        raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
-
 @app.post("/tasks/process-reminders", response_model=ProcessRemindersResponse)
 async def process_reminders(request: ProcessRemindersRequest = ProcessRemindersRequest()):
-    """Process client reminders automatically"""
+    """Execute automated reminder processing workflow"""
     try:
-        if not ANTHROPIC_API_KEY:
-            raise HTTPException(status_code=500, detail="Anthropic API key not configured")
-        
         agent = create_agent(dry_run=request.dry_run)
         
-        task_prompt = "Check for cases needing reminder emails and send appropriate communications to all clients who need them."
+        task_prompt = """Execute the complete reminder workflow:
+1. Check for all cases requiring document reminders
+2. Process each case individually with personalized communication
+3. Ensure all identified cases receive appropriate reminder emails
+4. Provide summary of actions taken"""
         
         result = await agent.ainvoke({"input": task_prompt})
         
+        # Extract summary from result
+        output = result.get("output", "Processing completed")
+        if isinstance(output, list) and output:
+            summary = str(output[0]) if isinstance(output[0], dict) and "text" in output[0] else str(output[0])
+        else:
+            summary = str(output)
+        
         return ProcessRemindersResponse(
             status="completed",
-            cases_processed=0,  # Would extract from agent logs in production
-            summary=result.get("output", "Task completed")
+            cases_processed=0,  # Extract from agent logs in production
+            summary=summary
         )
         
     except Exception as e:
-        logger.error(f"Processing error: {e}")
+        logger.error(f"Reminder processing failed: {e}")
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
-# Cloud Run startup
+# Application startup
 if __name__ == "__main__":
     import uvicorn
-    logger.info(f"Starting server on port {PORT}")
+    logger.info(f"Starting Client Communications Agent on port {PORT}")
     uvicorn.run(
         app,
         host="0.0.0.0",

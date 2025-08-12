@@ -338,8 +338,19 @@ async def chat_with_agent(request: ChatRequest):
         agent = create_agent(dry_run=request.dry_run)
         result = await agent.ainvoke({"input": request.message})
         
+        # Extract the actual response text from the agent result
+        output = result.get("output", "No response generated")
+        if isinstance(output, list):
+            # If output is a list of message objects, extract the text
+            if output and isinstance(output[0], dict) and "text" in output[0]:
+                response_text = output[0]["text"]
+            else:
+                response_text = str(output)
+        else:
+            response_text = str(output)
+        
         return ChatResponse(
-            response=result.get("output", "No response generated"),
+            response=response_text,
             timestamp=datetime.now().isoformat()
         )
         

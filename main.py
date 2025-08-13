@@ -240,9 +240,14 @@ async def update_workflow_status(workflow_id: str, status: WorkflowStatus) -> No
 async def add_reasoning_step(workflow_id: str, step: ReasoningStep) -> None:
     """Add reasoning step via backend API"""
     try:
+        # Convert datetime to ISO string for JSON serialization
+        step_data = step.model_dump()
+        if 'timestamp' in step_data and isinstance(step_data['timestamp'], datetime):
+            step_data['timestamp'] = step_data['timestamp'].isoformat()
+            
         response = await http_client.post(
             f"{BACKEND_URL}/api/workflows/{workflow_id}/reasoning-step",
-            json=step.dict()
+            json=step_data
         )
         response.raise_for_status()
     except Exception as e:
@@ -274,20 +279,72 @@ class GetCaseAnalysisTool(BaseTool):
         try:
             logger.info(f"📊 Getting comprehensive analysis for case {case_id}")
             
-            # Get case communications and analysis
-            response = await http_client.get(f"{BACKEND_URL}/api/cases/{case_id}/communications")
-            if response.status_code != 200:
-                raise Exception(f"Failed to get case communications: {response.status_code}")
+            # First try to get basic case details
+            case_response = await http_client.get(f"{BACKEND_URL}/api/cases/{case_id}")
+            if case_response.status_code != 200:
+                return json.dumps({"error": f"Case {case_id} not found"})
             
-            communications_data = response.json()
+            case_data = case_response.json()
             
-            # Get email suggestions
-            suggestions_response = await http_client.get(f"{BACKEND_URL}/api/cases/{case_id}/email-suggestions")
-            if suggestions_response.status_code == 200:
-                suggestions_data = suggestions_response.json()
-                communications_data["ai_suggestions"] = suggestions_data
+            # Try to get communication history (may not exist yet)
+            communications_data = {
+                "case_id": case_id,
+                "client_name": case_data["client_name"],
+                "client_email": case_data["client_email"],
+                "case_status": case_data["status"],
+                "documents_requested": case_data["documents_requested"],
+                "communication_summary": {
+                    "total_emails": 0,
+                    "last_email_date": None,
+                    "total_workflows": 0,
+                    "active_workflows": 0
+                },
+                "email_history": [],
+                "workflow_history": []
+            }
             
-            logger.info(f"📊 Retrieved comprehensive analysis for case {case_id}")
+            # Try to get communication history if endpoint exists
+            try:
+                comm_response = await http_client.get(f"{BACKEND_URL}/api/cases/{case_id}/communications")
+                if comm_response.status_code == 200:
+                    communications_data = comm_response.json()
+            except:
+                logger.info(f"Communications endpoint not available, using basic case data")
+            
+            # Try to get email suggestions if endpoint exists
+            try:
+                suggestions_response = await http_client.get(f"{BACKEND_URL}/api/cases/{case_id}/email-suggestions")
+                if suggestions_response.status_code == 200:
+                    suggestions_data = suggestions_response.json()
+                    communications_data["ai_suggestions"] = suggestions_data
+                else:
+                    # Provide default suggestions
+                    communications_data["ai_suggestions"] = {
+                        "suggested_emails": [
+                            {
+                                "email_type": "initial_reminder",
+                                "priority": "high",
+                                "reason": "No previous communications detected - send initial document request",
+                                "suggested_subject": f"Document Request - {case_data['client_name']} Case",
+                                "tone": "professional_friendly"
+                            }
+                        ]
+                    }
+            except:
+                logger.info(f"Email suggestions endpoint not available, using defaults")
+                communications_data["ai_suggestions"] = {
+                    "suggested_emails": [
+                        {
+                            "email_type": "initial_reminder",
+                            "priority": "high", 
+                            "reason": "Default initial contact",
+                            "suggested_subject": f"Document Request - {case_data['client_name']} Case",
+                            "tone": "professional_friendly"
+                        }
+                    ]
+                }
+            
+            logger.info(f"📊 Retrieved analysis for case {case_id}")
             
             return json.dumps(communications_data, indent=2)
             
@@ -851,9 +908,12 @@ async def chat_with_agent(request: ChatRequest):
             # Execute workflow and stream updates
             final_state = await execute_workflow(workflow_id, dry_run=request.dry_run)
             
-            # Stream reasoning chain
+            # Stream reasoning chain with proper serialization
             for step in final_state.reasoning_chain:
-                yield f"data: {json.dumps({'type': 'reasoning_step', 'step': step.dict()})}\n\n"
+                step_data = step.model_dump() if hasattr(step, 'model_dump') else step.dict()
+                if 'timestamp' in step_data and isinstance(step_data['timestamp'], datetime):
+                    step_data['timestamp'] = step_data['timestamp'].isoformat()
+                yield f"data: {json.dumps({'type': 'reasoning_step', 'step': step_data})}\n\n"
             
             yield f"data: {json.dumps({'type': 'workflow_complete', 'status': final_state.status.value})}\n\n"
             

@@ -5,5 +5,4 @@ pydantic
 langchain
 langchain-anthropic
 langchain-core
-resend
 python-multipart

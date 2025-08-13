@@ -76,7 +76,22 @@ def load_prompt(filename: str) -> str:
 
 def load_email_templates() -> Dict[str, Dict[str, str]]:
     """Load email templates from markdown file"""
-    template_content = load_prompt("email_templates.md")
+    try:
+        template_content = load_prompt("email_templates.md")
+    except:
+        # Fallback templates if file not found
+        return {
+            "initial_reminder": {
+                "subject_template": "Document Request - {client_name} Case",
+                "body_template": "Dear {client_name},\n\nWe need the following documents for your case:\n\n{documents_requested}\n\nPlease provide these at your earliest convenience.\n\nBest regards,\nLegal Team",
+                "tone": "professional_friendly"
+            },
+            "follow_up_reminder": {
+                "subject_template": "Follow-up: Document Request - {client_name}",
+                "body_template": "Dear {client_name},\n\nThis is a follow-up regarding the documents needed for your case:\n\n{documents_requested}\n\nPlease provide these documents as soon as possible.\n\nBest regards,\nLegal Team",
+                "tone": "professional_persistent"
+            }
+        }
     
     # Simple parsing - extract templates between ## headers
     templates = {}
@@ -117,6 +132,11 @@ def load_email_templates() -> Dict[str, Dict[str, str]]:
     # Save last template
     if current_template and current_body:
         templates[current_template]['body_template'] = '\n'.join(current_body).strip()
+    
+    # Add aliases for common variations
+    if 'initial_reminder' in templates:
+        templates['initial_document_request'] = templates['initial_reminder']
+        templates['initial_contact'] = templates['initial_reminder']
     
     return templates
 
@@ -194,40 +214,65 @@ class GetCaseAnalysisTool(BaseTool):
 
 class ComposeEmailTool(BaseTool):
     name: str = "compose_email"
-    description: str = "Compose email based on case context. Input: JSON with case_id, email_type"
+    description: str = "Compose email based on case context. Input: JSON with case_id, email_type (use: initial_reminder, follow_up_reminder, or urgent_reminder)"
     
     def _run(self, email_data: str) -> str:
         raise NotImplementedError("Use async version")
     
     async def _arun(self, email_data: str) -> str:
-        data = json.loads(email_data)
-        case_id = data["case_id"]
-        email_type = data.get("email_type", "initial_reminder")
-        
-        # Get case data
-        case_response = await http_client.get(f"{BACKEND_URL}/api/cases/{case_id}")
-        case_response.raise_for_status()
-        case_data = case_response.json()
-        
-        # Load templates
-        templates = load_email_templates()
-        template = templates[email_type]
-        
-        # Format email
-        subject = template["subject_template"].format(client_name=case_data["client_name"])
-        body = template["body_template"].format(
-            client_name=case_data["client_name"],
-            documents_requested=case_data["documents_requested"]
-        )
-        
-        return json.dumps({
-            "subject": subject,
-            "body": body,
-            "html_body": body.replace("\n", "<br>"),
-            "recipient": case_data["client_email"],
-            "case_id": case_id,
-            "email_type": email_type
-        }, indent=2)
+        try:
+            data = json.loads(email_data)
+            case_id = data["case_id"]
+            email_type = data.get("email_type", "initial_reminder")
+            
+            # Normalize email type to supported types
+            if email_type in ["initial_document_request", "initial_contact", "initial"]:
+                email_type = "initial_reminder"
+            elif email_type in ["followup", "follow_up", "reminder"]:
+                email_type = "follow_up_reminder"
+            elif email_type in ["urgent", "urgent_request"]:
+                email_type = "urgent_reminder"
+            
+            logger.info(f"✍️ Composing {email_type} email for case {case_id}")
+            
+            # Get case data
+            case_response = await http_client.get(f"{BACKEND_URL}/api/cases/{case_id}")
+            case_response.raise_for_status()
+            case_data = case_response.json()
+            
+            # Load templates
+            templates = load_email_templates()
+            
+            if email_type not in templates:
+                # Default to initial_reminder if type not found
+                email_type = "initial_reminder"
+            
+            template = templates[email_type]
+            
+            # Format email
+            subject = template["subject_template"].format(client_name=case_data["client_name"])
+            body = template["body_template"].format(
+                client_name=case_data["client_name"],
+                documents_requested=case_data["documents_requested"]
+            )
+            
+            result = {
+                "subject": subject,
+                "body": body,
+                "html_body": body.replace("\n", "<br>"),
+                "recipient": case_data["client_email"],
+                "case_id": case_id,
+                "email_type": email_type
+            }
+            
+            logger.info(f"✍️ Successfully composed {email_type} email for {case_data['client_name']}")
+            
+            return json.dumps(result, indent=2)
+            
+        except Exception as e:
+            error_msg = f"Email composition failed: {str(e)}"
+            logger.error(f"✍️ Composition ERROR: {error_msg}")
+            raise Exception(error_msg)
 
 class SendEmailTool(BaseTool):
     name: str = "send_email"

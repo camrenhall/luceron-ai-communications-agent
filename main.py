@@ -8,8 +8,9 @@ import logging
 import json
 import asyncio
 import uuid
+import resend
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
 from enum import Enum
 
@@ -36,12 +37,16 @@ logger = logging.getLogger(__name__)
 # Environment configuration
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 BACKEND_URL = os.getenv("BACKEND_URL")
-PORT = int(os.getenv("PORT", 8080))
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+FROM_EMAIL = os.getenv("FROM_EMAIL", "noreply@blueprintsw.com")
+PORT = int(os.getenv("PORT", 8082))
 
 if not ANTHROPIC_API_KEY:
     raise ValueError("ANTHROPIC_API_KEY environment variable is required")
 if not BACKEND_URL:
     raise ValueError("BACKEND_URL environment variable is required")
+if not RESEND_API_KEY:
+    logger.warning("RESEND_API_KEY not set - email sending will be simulated")
 
 # Global HTTP client
 http_client = None
@@ -97,6 +102,32 @@ class WorkflowResponse(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     dry_run: bool = False
+    
+# Enhanced Email Models
+class EmailType(str, Enum):
+    INITIAL_REMINDER = "initial_reminder"
+    FOLLOW_UP_REMINDER = "follow_up_reminder"
+    URGENT_REMINDER = "urgent_reminder"
+    DOCUMENT_RECEIVED = "document_received"
+    ANALYSIS_COMPLETE = "analysis_complete"
+    CUSTOM = "custom"
+
+class EnhancedEmailRequest(BaseModel):
+    recipient_email: str
+    subject: str
+    body: str
+    html_body: Optional[str] = None
+    case_id: str
+    email_type: EmailType = EmailType.CUSTOM
+    metadata: Optional[Dict[str, Any]] = {}
+
+class EnhancedEmailResponse(BaseModel):
+    message_id: str
+    status: str
+    recipient: str
+    case_id: str
+    email_type: str
+    sent_via: str  # "resend" or "simulated"
 
 # HTTP client management
 async def init_http_client():
@@ -134,7 +165,9 @@ async def create_workflow_state(state: WorkflowState) -> WorkflowState:
             json=workflow_data
         )
         response.raise_for_status()
-        # Convert to format expected by backend  
+        data = response.json()
+        
+        # Convert response back to WorkflowState
         reasoning_chain = [ReasoningStep(**step) for step in data.get("reasoning_chain", [])]
         
         return WorkflowState(
@@ -164,7 +197,25 @@ async def load_workflow_state(workflow_id: str) -> Optional[WorkflowState]:
             return None
             
         response.raise_for_status()
-        return WorkflowState(**response.json())
+        data = response.json()
+        
+        # Convert response to WorkflowState
+        reasoning_chain = [ReasoningStep(**step) for step in data.get("reasoning_chain", [])]
+        
+        return WorkflowState(
+            workflow_id=data['workflow_id'],
+            agent_type=data['agent_type'],
+            case_id=data.get('case_id'),
+            status=WorkflowStatus(data['status']),
+            initial_prompt=data['initial_prompt'],
+            reasoning_chain=reasoning_chain,
+            scheduled_for=datetime.fromisoformat(data['scheduled_for']) if data.get('scheduled_for') else None,
+            document_ids=data.get('document_ids', []),
+            case_context=data.get('case_context'),
+            priority=data.get('priority', 'standard'),
+            created_at=datetime.fromisoformat(data['created_at']),
+            updated_at=datetime.fromisoformat(data['updated_at'])
+        )
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             return None
@@ -190,7 +241,7 @@ async def add_reasoning_step(workflow_id: str, step: ReasoningStep) -> None:
     """Add reasoning step via backend API"""
     try:
         response = await http_client.post(
-            f"{BACKEND_URL}/api/workflows/{workflow_id}/reasoning",
+            f"{BACKEND_URL}/api/workflows/{workflow_id}/reasoning-step",
             json=step.dict()
         )
         response.raise_for_status()
@@ -209,7 +260,237 @@ async def get_pending_workflows() -> List[str]:
         logger.error(f"Failed to get pending workflows: {e}")
         return []
 
-# LangChain Tools (same as before)
+# Enhanced Communications Agent Tools
+
+class GetCaseAnalysisTool(BaseTool):
+    """Tool to get comprehensive case analysis for intelligent email decisions"""
+    name: str = "get_case_analysis"
+    description: str = "Get detailed case analysis including communication history, workflow status, and email suggestions. Input: case_id"
+    
+    def _run(self, case_id: str) -> str:
+        raise NotImplementedError("Use async version")
+    
+    async def _arun(self, case_id: str) -> str:
+        try:
+            logger.info(f"📊 Getting comprehensive analysis for case {case_id}")
+            
+            # Get case communications and analysis
+            response = await http_client.get(f"{BACKEND_URL}/api/cases/{case_id}/communications")
+            if response.status_code != 200:
+                raise Exception(f"Failed to get case communications: {response.status_code}")
+            
+            communications_data = response.json()
+            
+            # Get email suggestions
+            suggestions_response = await http_client.get(f"{BACKEND_URL}/api/cases/{case_id}/email-suggestions")
+            if suggestions_response.status_code == 200:
+                suggestions_data = suggestions_response.json()
+                communications_data["ai_suggestions"] = suggestions_data
+            
+            logger.info(f"📊 Retrieved comprehensive analysis for case {case_id}")
+            
+            return json.dumps(communications_data, indent=2)
+            
+        except Exception as e:
+            error_msg = f"Failed to get case analysis: {str(e)}"
+            logger.error(f"📊 Analysis ERROR: {error_msg}")
+            return json.dumps({"error": error_msg})
+
+class ComposeIntelligentEmailTool(BaseTool):
+    """Tool to compose contextually appropriate emails based on case analysis"""
+    name: str = "compose_intelligent_email"
+    description: str = "Compose an appropriate email based on case context and communication history. Input: JSON with case_id, email_type, custom_instructions"
+    
+    def _run(self, email_data: str) -> str:
+        raise NotImplementedError("Use async version")
+    
+    async def _arun(self, email_data: str) -> str:
+        try:
+            data = json.loads(email_data)
+            case_id = data.get("case_id")
+            email_type = data.get("email_type", "follow_up_reminder")
+            custom_instructions = data.get("custom_instructions", "")
+            
+            logger.info(f"✍️ Composing {email_type} email for case {case_id}")
+            
+            # Get case analysis first
+            case_analysis_response = await http_client.get(f"{BACKEND_URL}/api/cases/{case_id}")
+            if case_analysis_response.status_code != 200:
+                raise Exception("Failed to get case data for email composition")
+            
+            case_data = case_analysis_response.json()
+            
+            # Email templates based on type and context
+            email_templates = {
+                "initial_reminder": {
+                    "subject_template": "Document Request - {client_name} Case",
+                    "body_template": """Dear {client_name},
+
+I hope this message finds you well. I am writing regarding your family law case.
+
+To move forward with your case, we need the following documents:
+
+{documents_requested}
+
+Please provide these documents at your earliest convenience. You can:
+- Email them to this address
+- Drop them off at our office
+- Mail them to our office address
+
+Having these documents promptly will help us serve you better and move your case forward efficiently.
+
+If you have any questions or need clarification about any of these documents, please don't hesitate to contact me.
+
+Best regards,
+Legal Team""",
+                    "tone": "professional_friendly"
+                },
+                
+                "follow_up_reminder": {
+                    "subject_template": "Follow-up: Document Request - {client_name}",
+                    "body_template": """Dear {client_name},
+
+I wanted to follow up on my previous message regarding the documents needed for your case.
+
+As a reminder, we still need:
+
+{documents_requested}
+
+We understand that gathering these documents can take time, but having them is essential for moving your case forward effectively.
+
+Please let me know if you're having difficulty obtaining any of these documents or if you need more time. We're here to help make this process as smooth as possible.
+
+You can reach me directly if you have any questions or concerns.
+
+Best regards,
+Legal Team""",
+                    "tone": "professional_persistent"
+                },
+                
+                "urgent_reminder": {
+                    "subject_template": "URGENT: Missing Documents - {client_name} Case",
+                    "body_template": """Dear {client_name},
+
+This is an urgent follow-up regarding the outstanding documents needed for your family law case.
+
+We have been waiting for the following critical documents:
+
+{documents_requested}
+
+The delay in receiving these documents is now impacting our ability to represent you effectively. Time-sensitive deadlines in your case may be at risk.
+
+IMMEDIATE ACTION REQUIRED:
+Please provide these documents within the next 48 hours, or contact me immediately to discuss alternative arrangements.
+
+If there are circumstances preventing you from providing these documents, please call me today so we can address any issues and keep your case on track.
+
+Your prompt attention to this matter is crucial.
+
+Urgent regards,
+Legal Team""",
+                    "tone": "professional_urgent"
+                }
+            }
+            
+            # Get appropriate template
+            template = email_templates.get(email_type, email_templates["follow_up_reminder"])
+            
+            # Format email content
+            subject = template["subject_template"].format(
+                client_name=case_data["client_name"]
+            )
+            
+            body = template["body_template"].format(
+                client_name=case_data["client_name"],
+                documents_requested=case_data["documents_requested"]
+            )
+            
+            # Add custom instructions if provided
+            if custom_instructions:
+                body += f"\n\nAdditional Information:\n{custom_instructions}"
+            
+            # Create HTML version
+            html_body = body.replace("\n", "<br>")
+            
+            email_composition = {
+                "subject": subject,
+                "body": body,
+                "html_body": html_body,
+                "email_type": email_type,
+                "tone": template["tone"],
+                "recipient": case_data["client_email"],
+                "case_context": {
+                    "case_id": case_id,
+                    "client_name": case_data["client_name"]
+                }
+            }
+            
+            logger.info(f"✍️ Composed {email_type} email for case {case_id}")
+            
+            return json.dumps(email_composition, indent=2)
+            
+        except Exception as e:
+            error_msg = f"Email composition failed: {str(e)}"
+            logger.error(f"✍️ Composition ERROR: {error_msg}")
+            return json.dumps({"error": error_msg})
+
+class SendEnhancedEmailTool(BaseTool):
+    """Tool to send emails via the enhanced backend with proper metadata tracking"""
+    name: str = "send_enhanced_email"
+    description: str = "Send email via enhanced backend with Resend integration. Input: JSON with recipient_email, subject, body, html_body, case_id, email_type, metadata"
+    
+    def _run(self, email_data: str) -> str:
+        raise NotImplementedError("Use async version")
+    
+    async def _arun(self, email_data: str) -> str:
+        try:
+            data = json.loads(email_data)
+            
+            # Validate required fields
+            required_fields = ["recipient_email", "subject", "body", "case_id"]
+            missing_fields = [field for field in required_fields if not data.get(field)]
+            if missing_fields:
+                raise ValueError(f"Missing required fields: {missing_fields}")
+            
+            logger.info(f"📧 Sending enhanced email to {data['recipient_email']} for case {data['case_id']}")
+            
+            # Prepare email request
+            email_request = {
+                "recipient_email": data["recipient_email"],
+                "subject": data["subject"],
+                "body": data["body"],
+                "html_body": data.get("html_body"),
+                "case_id": data["case_id"],
+                "email_type": data.get("email_type", "custom"),
+                "metadata": data.get("metadata", {})
+            }
+            
+            # Send via backend
+            response = await http_client.post(
+                f"{BACKEND_URL}/api/send-email",
+                json=email_request
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            logger.info(f"📧 Email sent successfully - ID: {result['message_id']}, Status: {result['status']}")
+            
+            return json.dumps({
+                "status": "email_sent",
+                "message_id": result["message_id"],
+                "sent_via": result["sent_via"],
+                "email_type": result["email_type"],
+                "recipient": result["recipient"],
+                "case_id": result["case_id"]
+            }, indent=2)
+            
+        except Exception as e:
+            error_msg = f"Enhanced email sending failed: {str(e)}"
+            logger.error(f"📧 Email ERROR: {error_msg}")
+            return json.dumps({"error": error_msg})
+
+# Original Tools (for backward compatibility)
 class CheckCaseStatusTool(BaseTool):
     """Tool to check cases needing reminder communications via backend API"""
     name: str = "check_case_status"
@@ -267,16 +548,6 @@ class SendEmailTool(BaseTool):
             
             result = response.json()
             
-            # Update case communication date
-            update_response = await http_client.put(
-                f"{BACKEND_URL}/api/cases/{data['case_id']}/communication-date",
-                json={
-                    "case_id": data['case_id'],
-                    "last_communication_date": datetime.now().isoformat()
-                }
-            )
-            update_response.raise_for_status()
-            
             return f"Email sent successfully to {data['recipient_email']} for case {data['case_id']} (Message ID: {result['message_id']})"
             
         except Exception as e:
@@ -331,6 +602,74 @@ class WorkflowStatePersistenceHandler(BaseCallbackHandler):
             logger.error(f"Failed to add reasoning step: {e}")
             # Continue execution even if logging fails
 
+# Enhanced Communications Agent Creation
+def create_enhanced_communications_agent(workflow_id: str) -> AgentExecutor:
+    """Create enhanced communications agent with intelligent email capabilities"""
+    
+    llm = ChatAnthropic(
+        model="claude-3-5-sonnet-20241022",
+        api_key=ANTHROPIC_API_KEY,
+        temperature=0.1
+    )
+    
+    tools = [
+        GetCaseAnalysisTool(),
+        ComposeIntelligentEmailTool(), 
+        SendEnhancedEmailTool(),
+        # Keep original tools for backward compatibility
+        CheckCaseStatusTool(),
+        SendEmailTool()  # Original basic tool
+    ]
+    
+    # Enhanced system prompt
+    system_prompt = """You are an intelligent Communications Agent for a family law firm specializing in document collection and client communication.
+
+Your enhanced capabilities:
+1. **Contextual Analysis**: Use get_case_analysis to understand the full case context, communication history, and client situation
+2. **Intelligent Email Composition**: Use compose_intelligent_email to create appropriate emails based on case state and history  
+3. **Professional Communication**: Send emails via send_enhanced_email with proper tracking and metadata
+
+Your decision-making process:
+1. ALWAYS start by analyzing the case thoroughly with get_case_analysis
+2. Based on the analysis, determine the most appropriate communication strategy:
+   - Initial contact: Professional, friendly introduction with clear document requests
+   - Follow-up: Persistent but understanding, acknowledging previous contact
+   - Urgent: Professional urgency emphasizing case impact and deadlines
+   - Custom: Tailored to specific circumstances
+3. Compose contextually appropriate emails that:
+   - Reference previous communications appropriately
+   - Show understanding of client situation
+   - Provide clear, actionable next steps
+   - Maintain professional tone while being human and empathetic
+4. Send emails with proper metadata for tracking and audit trails
+
+Key principles:
+- Always be professional but human
+- Acknowledge the client's situation and any delays with understanding
+- Be clear about deadlines and consequences
+- Provide multiple ways for clients to respond or get help
+- Track all communications for legal compliance
+
+You have access to rich case data including communication history, workflow states, and AI-powered suggestions. Use this intelligence to provide personalized, effective client communication."""
+    
+    prompt = ChatPromptTemplate.from_messages([
+        SystemMessage(content=system_prompt),
+        MessagesPlaceholder("chat_history", optional=True),
+        ("human", "{input}"),
+        MessagesPlaceholder("agent_scratchpad")
+    ])
+    
+    agent = create_tool_calling_agent(llm, tools, prompt)
+    
+    return AgentExecutor(
+        agent=agent,
+        tools=tools,
+        verbose=True,
+        handle_parsing_errors=True,
+        max_iterations=15,
+        return_intermediate_steps=True
+    )
+
 async def execute_workflow(workflow_id: str, dry_run: bool = False) -> WorkflowState:
     """Execute a workflow with state persistence via backend API"""
     
@@ -343,53 +682,12 @@ async def execute_workflow(workflow_id: str, dry_run: bool = False) -> WorkflowS
     await update_workflow_status(workflow_id, WorkflowStatus.PROCESSING)
     
     try:
-        # Create agent with persistence callback
+        # Create enhanced agent with persistence callback
         persistence_handler = WorkflowStatePersistenceHandler(workflow_id)
-        
-        llm = ChatAnthropic(
-            model="claude-3-5-sonnet-20241022",
-            api_key=ANTHROPIC_API_KEY,
-            temperature=0.1
-        )
-        
-        tools = [CheckCaseStatusTool(), SendEmailTool(dry_run=dry_run)]
-        
-        prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content="""You are a Client Communications Agent for a Family Law firm.
-
-CORE RESPONSIBILITY:
-Execute automated client reminder workflows based on case triggers and schedules.
-
-WORKFLOW:
-1. Use check_case_status to identify cases needing attention
-2. For each case, compose personalized, professional reminder emails
-3. Send emails using send_email tool
-4. Provide summary of actions taken
-
-EMAIL REQUIREMENTS:
-- Professional yet warm and understanding tone
-- Acknowledge the emotional difficulty of family law proceedings
-- Clearly specify the exact documents needed
-- Provide reasonable timeframe for document submission
-- Offer assistance and support
-
-Execute systematically and thoroughly to ensure no cases are overlooked."""),
-            MessagesPlaceholder("chat_history", optional=True),
-            ("human", "{input}"),
-            MessagesPlaceholder("agent_scratchpad")
-        ])
-        
-        agent = create_tool_calling_agent(llm, tools, prompt)
-        executor = AgentExecutor(
-            agent=agent,
-            tools=tools,
-            verbose=True,
-            handle_parsing_errors=True,
-            max_iterations=15
-        )
+        agent = create_enhanced_communications_agent(workflow_id)
         
         # Execute with callback
-        result = await executor.ainvoke(
+        result = await agent.ainvoke(
             {"input": state.initial_prompt},
             config={"callbacks": [persistence_handler]}
         )

@@ -13,6 +13,7 @@ from enum import Enum
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import httpx
 from langchain.agents import AgentExecutor, create_tool_calling_agent
@@ -367,6 +368,15 @@ app = FastAPI(
     title="Communications Agent",
     version="1.0.0",
     lifespan=lifespan
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://simple-s3-upload.onrender.com"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.get("/")

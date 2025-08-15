@@ -76,22 +76,7 @@ def load_prompt(filename: str) -> str:
 
 def load_email_templates() -> Dict[str, Dict[str, str]]:
     """Load email templates from markdown file"""
-    try:
-        template_content = load_prompt("email_templates.md")
-    except:
-        # Fallback templates if file not found
-        return {
-            "initial_reminder": {
-                "subject_template": "Document Request - {client_name} Case",
-                "body_template": "Dear {client_name},\n\nWe need the following documents for your case:\n\n{documents_requested}\n\nPlease provide these at your earliest convenience.\n\nBest regards,\nLegal Team",
-                "tone": "professional_friendly"
-            },
-            "follow_up_reminder": {
-                "subject_template": "Follow-up: Document Request - {client_name}",
-                "body_template": "Dear {client_name},\n\nThis is a follow-up regarding the documents needed for your case:\n\n{documents_requested}\n\nPlease provide these documents as soon as possible.\n\nBest regards,\nLegal Team",
-                "tone": "professional_persistent"
-            }
-        }
+    template_content = load_prompt("email_templates.md")
     
     # Simple parsing - extract templates between ## headers
     templates = {}

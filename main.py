@@ -189,13 +189,16 @@ class GetCaseAnalysisTool(BaseTool):
         except:
             pass
         
-        # Return basic case data
+        # Return basic case data with new schema format
         return json.dumps({
             "case_id": case_id,
             "client_name": case_data["client_name"],
             "client_email": case_data["client_email"],
-            "documents_requested": case_data["documents_requested"],
-            "communication_summary": {"total_emails": 0}
+            "client_phone": case_data.get("client_phone"),
+            "status": case_data.get("status", "unknown"),
+            "requested_documents": case_data.get("requested_documents", []),
+            "last_communication_date": case_data.get("last_communication_date"),
+            "communication_summary": {"total_communications": 0, "total_emails": 0}
         }, indent=2)
 
 class ComposeEmailTool(BaseTool):
@@ -235,11 +238,23 @@ class ComposeEmailTool(BaseTool):
             
             template = templates[email_type]
             
+            # Format documents list for email
+            requested_docs = case_data.get("requested_documents", [])
+            if requested_docs:
+                # If it's the new format (array of objects)
+                if isinstance(requested_docs[0], dict):
+                    doc_list = "\n".join([f"• {doc['document_name']}" for doc in requested_docs])
+                else:
+                    # If it's an array of strings
+                    doc_list = "\n".join([f"• {doc}" for doc in requested_docs])
+            else:
+                doc_list = "No specific documents listed"
+            
             # Format email
             subject = template["subject_template"].format(client_name=case_data["client_name"])
             body = template["body_template"].format(
                 client_name=case_data["client_name"],
-                documents_requested=case_data["documents_requested"]
+                documents_requested=doc_list
             )
             
             result = {
@@ -280,6 +295,117 @@ class SendEmailTool(BaseTool):
             "recipient": result["recipient"]
         }, indent=2)
 
+class CreateCaseTool(BaseTool):
+    name: str = "create_case"
+    description: str = "Create a new case for a client. Input: JSON with client_name, client_email, documents_requested (string or array of document names), client_phone (optional)"
+    
+    def _run(self, case_data: str) -> str:
+        raise NotImplementedError("Use async version")
+    
+    async def _arun(self, case_data: str) -> str:
+        try:
+            data = json.loads(case_data)
+            client_name = data["client_name"]
+            client_email = data["client_email"]
+            documents_requested = data["documents_requested"]
+            client_phone = data.get("client_phone")
+            
+            logger.info(f"🆕 Creating new case for client: {client_name} ({client_email})")
+            
+            # Generate unique case ID
+            case_id = f"case_{uuid.uuid4().hex[:12]}"
+            
+            # Convert documents_requested to array format if it's a string
+            if isinstance(documents_requested, str):
+                # Split by common delimiters and clean up
+                doc_names = [doc.strip() for doc in documents_requested.replace(',', '\n').replace(';', '\n').split('\n') if doc.strip()]
+            else:
+                doc_names = documents_requested if isinstance(documents_requested, list) else [str(documents_requested)]
+            
+            # Create requested documents array in the format expected by backend
+            requested_documents = []
+            for doc_name in doc_names:
+                requested_documents.append({
+                    "document_name": doc_name,
+                    "description": f"Required document: {doc_name}"
+                })
+            
+            # Create case payload matching new backend schema
+            case_payload = {
+                "case_id": case_id,
+                "client_name": client_name,
+                "client_email": client_email,
+                "client_phone": client_phone,
+                "requested_documents": requested_documents
+            }
+            
+            response = await http_client.post(f"{BACKEND_URL}/api/cases", json=case_payload)
+            response.raise_for_status()
+            case_result = response.json()
+            created_case_id = case_result["case_id"]
+            
+            logger.info(f"🆕 Successfully created case {created_case_id} for {client_name}")
+            
+            # Automatically send initial email to client
+            logger.info(f"📧 Automatically sending initial email to {client_name}")
+            
+            # Load templates and compose email
+            templates = load_email_templates()
+            template = templates.get("initial_reminder", templates.get("initial_contact"))
+            
+            if template:
+                # Format documents list for email
+                doc_list = "\n".join([f"• {doc_name}" for doc_name in doc_names])
+                
+                subject = template["subject_template"].format(client_name=client_name)
+                body = template["body_template"].format(
+                    client_name=client_name,
+                    documents_requested=doc_list
+                )
+                
+                # Send email via backend
+                email_payload = {
+                    "recipient_email": client_email,
+                    "subject": subject,
+                    "body": body,
+                    "case_id": created_case_id,
+                    "email_type": "initial_contact"
+                }
+                
+                email_response = await http_client.post(f"{BACKEND_URL}/api/send-email", json=email_payload)
+                email_response.raise_for_status()
+                email_result = email_response.json()
+                
+                logger.info(f"📧 Successfully sent initial email to {client_name} (Message ID: {email_result.get('message_id')})")
+                
+                return json.dumps({
+                    "status": "success",
+                    "case_id": created_case_id,
+                    "client_name": client_name,
+                    "client_email": client_email,
+                    "client_phone": client_phone,
+                    "requested_documents": requested_documents,
+                    "email_sent": True,
+                    "email_message_id": email_result.get("message_id")
+                }, indent=2)
+            else:
+                logger.warning(f"⚠️ No email template found, case created but no email sent")
+                return json.dumps({
+                    "status": "success",
+                    "case_id": created_case_id,
+                    "client_name": client_name,
+                    "client_email": client_email,
+                    "client_phone": client_phone,
+                    "requested_documents": requested_documents,
+                    "email_sent": False,
+                    "warning": "No email template available"
+                }, indent=2)
+                
+        except Exception as e:
+            error_msg = f"Case creation failed: {str(e)}"
+            logger.error(f"🆕 Case creation ERROR: {error_msg}")
+            raise Exception(error_msg)
+
 # Callback handler
 class WorkflowCallbackHandler(BaseCallbackHandler):
     def __init__(self, workflow_id: str):
@@ -310,7 +436,8 @@ def create_communications_agent(workflow_id: str) -> AgentExecutor:
     tools = [
         GetCaseAnalysisTool(),
         ComposeEmailTool(),
-        SendEmailTool()
+        SendEmailTool(),
+        CreateCaseTool()
     ]
     
     system_prompt = load_prompt("communications_agent_system_prompt.md")
@@ -387,6 +514,7 @@ async def health_check():
 
 @app.post("/chat")
 async def chat_with_agent(request: ChatRequest):
+    logger.info(f"📨 Incoming chat message: {request.message}")
     workflow_id = f"wf_chat_{uuid.uuid4().hex[:8]}"
     
     # Create workflow

@@ -63,7 +63,6 @@ class WorkflowState(BaseModel):
     initial_prompt: str
     reasoning_chain: List[ReasoningStep]
     created_at: datetime
-    updated_at: datetime
 
 class ChatRequest(BaseModel):
     message: str
@@ -523,8 +522,7 @@ async def chat_with_agent(request: ChatRequest):
         status=WorkflowStatus.PENDING,
         initial_prompt=request.message,
         reasoning_chain=[],
-        created_at=datetime.now(),
-        updated_at=datetime.now()
+        created_at=datetime.now()
     )
     
     await create_workflow_state(state)

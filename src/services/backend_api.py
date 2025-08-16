@@ -30,3 +30,17 @@ async def update_workflow_status(workflow_id: str, status: WorkflowStatus) -> No
         json={"status": status.value}
     )
     response.raise_for_status()
+
+
+async def add_reasoning_step(workflow_id: str, step: ReasoningStep) -> None:
+    """Add a reasoning step to the workflow"""
+    step_data = step.model_dump()
+    if 'timestamp' in step_data:
+        step_data['timestamp'] = step_data['timestamp'].isoformat()
+    
+    http_client = get_http_client()
+    response = await http_client.post(
+        f"{BACKEND_URL}/api/workflows/{workflow_id}/reasoning-step",
+        json=step_data
+    )
+    response.raise_for_status()

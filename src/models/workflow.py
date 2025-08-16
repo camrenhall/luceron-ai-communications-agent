@@ -23,7 +23,7 @@ class ReasoningStep(BaseModel):
 
 
 class WorkflowState(BaseModel):
-    workflow_id: str
+    workflow_id: Optional[str] = None
     agent_type: str = "CommunicationsAgent"
     case_id: Optional[str] = None
     status: WorkflowStatus

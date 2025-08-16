@@ -5,9 +5,9 @@ import json
 import logging
 from langchain.tools import BaseTool
 
-from app.config.settings import BACKEND_URL
-from app.services.http_client import get_http_client
-from app.services.prompt_loader import load_email_templates
+from src.config.settings import BACKEND_URL
+from src.services.http_client import get_http_client
+from src.services.prompt_loader import load_email_templates
 
 logger = logging.getLogger(__name__)
 

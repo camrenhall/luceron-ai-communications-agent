@@ -1,9 +1,9 @@
 """
 Backend API integration service
 """
-from app.config.settings import BACKEND_URL
-from app.models.workflow import WorkflowState, WorkflowStatus, ReasoningStep
-from app.services.http_client import get_http_client
+from src.config.settings import BACKEND_URL
+from src.models.workflow import WorkflowState, WorkflowStatus, ReasoningStep
+from src.services.http_client import get_http_client
 
 
 async def create_workflow_state(state: WorkflowState) -> None:

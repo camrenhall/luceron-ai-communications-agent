@@ -4,8 +4,8 @@ Email sender tool implementation
 import json
 from langchain.tools import BaseTool
 
-from app.config.settings import BACKEND_URL
-from app.services.http_client import get_http_client
+from src.config.settings import BACKEND_URL
+from src.services.http_client import get_http_client
 
 
 class SendEmailTool(BaseTool):

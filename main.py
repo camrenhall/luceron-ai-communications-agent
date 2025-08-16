@@ -11,13 +11,13 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config.settings import PORT
-from app.models.requests import ChatRequest
-from app.models.workflow import WorkflowState, WorkflowStatus
-from app.services.http_client import init_http_client, close_http_client, get_http_client
-from app.services.backend_api import create_workflow_state
-from app.services.workflow_service import execute_workflow
-from app.config.settings import BACKEND_URL
+from src.config.settings import PORT
+from src.models.requests import ChatRequest
+from src.models.workflow import WorkflowState, WorkflowStatus
+from src.services.http_client import init_http_client, close_http_client, get_http_client
+from src.services.backend_api import create_workflow_state
+from src.services.workflow_service import execute_workflow
+from src.config.settings import BACKEND_URL
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

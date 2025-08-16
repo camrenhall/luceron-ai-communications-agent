@@ -3,12 +3,12 @@ Workflow execution service
 """
 import logging
 
-from app.config.settings import BACKEND_URL
-from app.models.workflow import WorkflowStatus
-from app.services.http_client import get_http_client
-from app.services.backend_api import update_workflow_status
-from app.agents.communications import create_communications_agent
-from app.agents.callbacks import WorkflowCallbackHandler
+from src.config.settings import BACKEND_URL
+from src.models.workflow import WorkflowStatus
+from src.services.http_client import get_http_client
+from src.services.backend_api import update_workflow_status
+from src.agents.communications import create_communications_agent
+from src.agents.callbacks import WorkflowCallbackHandler
 
 logger = logging.getLogger(__name__)
 

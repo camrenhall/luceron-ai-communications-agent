@@ -6,12 +6,12 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage
 
-from app.config.settings import ANTHROPIC_API_KEY
-from app.services.prompt_loader import load_prompt
-from app.tools.case_analysis import GetCaseAnalysisTool
-from app.tools.email_composer import ComposeEmailTool
-from app.tools.email_sender import SendEmailTool
-from app.tools.case_creator import CreateCaseTool
+from src.config.settings import ANTHROPIC_API_KEY
+from src.services.prompt_loader import load_prompt
+from src.tools.case_analysis import GetCaseAnalysisTool
+from src.tools.email_composer import ComposeEmailTool
+from src.tools.email_sender import SendEmailTool
+from src.tools.case_creator import CreateCaseTool
 
 
 def create_communications_agent(workflow_id: str) -> AgentExecutor:

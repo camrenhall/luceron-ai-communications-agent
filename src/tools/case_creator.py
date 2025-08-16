@@ -30,9 +30,6 @@ class CreateCaseTool(BaseTool):
             
             logger.info(f"🆕 Creating new case for client: {client_name} ({client_email})")
             
-            # Generate unique case ID
-            case_id = f"case_{uuid.uuid4().hex[:12]}"
-            
             # Convert documents_requested to array format if it's a string
             if isinstance(documents_requested, str):
                 # Split by common delimiters and clean up
@@ -50,7 +47,6 @@ class CreateCaseTool(BaseTool):
             
             # Create case payload matching new backend schema
             case_payload = {
-                "case_id": case_id,
                 "client_name": client_name,
                 "client_email": client_email,
                 "client_phone": client_phone,

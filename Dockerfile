@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=True
 ENV PYTHONDONTWRITEBYTECODE=True
@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY prompts/ prompts/
+COPY src/ src/
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \

@@ -69,24 +69,22 @@ async def status_check():
 @app.post("/chat")
 async def chat_with_agent(request: ChatRequest):
     logger.info(f"📨 Incoming chat message: {request.message}")
-    workflow_id = f"wf_chat_{uuid.uuid4().hex[:8]}"
     
-    # Create workflow
+    # Create workflow for auditing/tracking and get backend-generated workflow_id
     state = WorkflowState(
-        workflow_id=workflow_id,
         status=WorkflowStatus.PENDING,
         initial_prompt=request.message,
         reasoning_chain=[],
         created_at=datetime.now()
     )
     
-    await create_workflow_state(state)
+    workflow_id = await create_workflow_state(state)
     
     async def generate_stream():
         try:
-            yield f"data: {json.dumps({'type': 'started', 'workflow_id': workflow_id})}\n\n"
+            yield f"data: {json.dumps({'type': 'started'})}\n\n"
             
-            await execute_workflow(workflow_id)
+            await execute_workflow(workflow_id, request.message)
             
             yield f"data: {json.dumps({'type': 'completed'})}\n\n"
             

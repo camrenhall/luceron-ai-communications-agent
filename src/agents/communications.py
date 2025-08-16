@@ -14,8 +14,8 @@ from src.tools.email_sender import SendEmailTool
 from src.tools.case_creator import CreateCaseTool
 
 
-def create_communications_agent(workflow_id: str) -> AgentExecutor:
-    """Create a communications agent for the given workflow"""
+def create_communications_agent() -> AgentExecutor:
+    """Create a communications agent"""
     llm = ChatAnthropic(
         model="claude-3-5-sonnet-20241022",
         api_key=ANTHROPIC_API_KEY,

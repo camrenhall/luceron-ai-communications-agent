@@ -3,9 +3,14 @@ Communications Agent - FastAPI Application
 """
 import json
 import logging
+import sys
+import os
 import uuid
 from datetime import datetime
 from contextlib import asynccontextmanager
+
+# Add the current directory to Python path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse

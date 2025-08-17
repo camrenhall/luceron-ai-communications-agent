@@ -4,7 +4,7 @@ Workflow execution service
 import logging
 
 from src.models.workflow import WorkflowStatus
-from src.services.backend_api import update_workflow_status
+from src.services.backend_api import update_workflow_status, update_workflow
 from src.agents.communications import create_communications_agent
 from src.agents.callbacks import WorkflowCallbackHandler
 
@@ -20,13 +20,22 @@ async def execute_workflow(workflow_id: str, initial_prompt: str) -> None:
         # Execute agent with callback handler for reasoning step tracking
         callback_handler = WorkflowCallbackHandler(workflow_id)
         agent = create_communications_agent()
-        await agent.ainvoke(
+        result = await agent.ainvoke(
             {"input": initial_prompt},
             config={"callbacks": [callback_handler]}
         )
         
-        # Update status to completed
-        await update_workflow_status(workflow_id, WorkflowStatus.COMPLETED)
+        # Extract the final response from the agent's output
+        final_response = result.get("output", "") if result else ""
+        logger.info(f"Workflow {workflow_id} completed with response length: {len(final_response)}")
+        
+        # Update workflow with final response and completed status
+        await update_workflow(
+            workflow_id, 
+            status=WorkflowStatus.COMPLETED,
+            final_response=final_response
+        )
+        logger.info(f"Workflow {workflow_id} final response persisted to backend")
         
     except Exception as e:
         logger.error(f"Workflow {workflow_id} execution failed: {e}")

@@ -12,6 +12,11 @@ from src.tools.case_analysis import GetCaseAnalysisTool
 from src.tools.email_composer import ComposeEmailTool
 from src.tools.email_sender import SendEmailTool
 from src.tools.case_creator import CreateCaseTool
+from src.tools.document_manager import (
+    UpdateDocumentStatusTool,
+    GetDocumentStatusTool,
+    GetPendingRemindersTool
+)
 
 
 def create_communications_agent() -> AgentExecutor:
@@ -26,7 +31,10 @@ def create_communications_agent() -> AgentExecutor:
         GetCaseAnalysisTool(),
         ComposeEmailTool(),
         SendEmailTool(),
-        CreateCaseTool()
+        CreateCaseTool(),
+        UpdateDocumentStatusTool(),
+        GetDocumentStatusTool(),
+        GetPendingRemindersTool()
     ]
     
     system_prompt = load_prompt("communications_agent_system_prompt.md")

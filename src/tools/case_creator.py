@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class CreateCaseTool(BaseTool):
     name: str = "create_case"
-    description: str = "Create a new case for a client. Input: JSON with client_name, client_email, documents_requested (string or array of document names), client_phone (optional)"
+    description: str = "Create a new case for a client. Input: JSON with client_name, client_email, documents_requested (REQUIRED: string or array of document names), client_phone (optional)"
     
     def _run(self, case_data: str) -> str:
         raise NotImplementedError("Use async version")
@@ -25,17 +25,26 @@ class CreateCaseTool(BaseTool):
             data = json.loads(case_data)
             client_name = data["client_name"]
             client_email = data["client_email"]
+            # documents_requested is REQUIRED - this is the core purpose of the platform
+            if "documents_requested" not in data:
+                raise Exception("documents_requested is required - this is a document collection platform!")
             documents_requested = data["documents_requested"]
             client_phone = data.get("client_phone")
             
             logger.info(f"🆕 Creating new case for client: {client_name} ({client_email})")
             
-            # Convert documents_requested to array format if it's a string
+            # Process documents_requested - convert to standardized array format
             if isinstance(documents_requested, str):
                 # Split by common delimiters and clean up
                 doc_names = [doc.strip() for doc in documents_requested.replace(',', '\n').replace(';', '\n').split('\n') if doc.strip()]
+            elif isinstance(documents_requested, list):
+                doc_names = [str(doc).strip() for doc in documents_requested if str(doc).strip()]
             else:
-                doc_names = documents_requested if isinstance(documents_requested, list) else [str(documents_requested)]
+                doc_names = [str(documents_requested).strip()] if str(documents_requested).strip() else []
+            
+            # Validate that we have at least one document
+            if not doc_names:
+                raise Exception("At least one document must be requested - this is a document collection platform!")
             
             # Create requested documents array in the format expected by backend
             requested_documents = []

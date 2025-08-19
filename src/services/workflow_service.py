@@ -26,7 +26,20 @@ async def execute_workflow(workflow_id: str, initial_prompt: str) -> None:
         )
         
         # Extract the final response from the agent's output
-        final_response = result.get("output", "") if result else ""
+        agent_output = result.get("output", "") if result else ""
+        
+        # Handle case where output is an array of message objects
+        if isinstance(agent_output, list) and len(agent_output) > 0:
+            # Extract text from the first message object
+            first_message = agent_output[0]
+            if isinstance(first_message, dict) and "text" in first_message:
+                final_response = first_message["text"]
+            else:
+                final_response = str(agent_output)
+        else:
+            # Output is already a string or empty
+            final_response = str(agent_output) if agent_output else ""
+            
         logger.info(f"Workflow {workflow_id} completed with response length: {len(final_response)}")
         
         # Update workflow with final response and completed status

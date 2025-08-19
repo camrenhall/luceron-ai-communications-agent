@@ -11,6 +11,8 @@ The Luceron AI Communications Agent automates legal document collection for law 
 - **Document Collection Automation**: Streamlines requesting and tracking legal documents from clients  
 - **Email Communication Management**: Automates client contact, follow-ups, and urgent communications
 - **Case Creation**: Creates new cases with document requirements through conversational interface
+- **Stateful Conversations**: Maintains context and memory across interactions for personalized responses
+- **Intelligent Token Management**: Optimizes conversation context through automatic summarization
 
 ### System Architecture
 
@@ -64,11 +66,14 @@ graph TB
 - **Agent-Based Processing**: Uses LangChain's tool-calling agent with ReAct (Reasoning and Acting) pattern
 - **Service Layer Integration**: Centralized HTTP client for backend API communications  
 - **Modular Tools**: Each business operation (case lookup, email sending) implemented as discrete tools
-- **Stateless Processing**: Each request processed independently without session persistence
+- **Stateful Processing**: Maintains conversation context and case memory for enhanced user experience
+- **Conversation Management**: Tracks agent reasoning, tool usage, and context across sessions
+- **Token Optimization**: Intelligent summarization and context compression for efficient AI processing
 
 ### Integration Dependencies
 
 - **Backend Server**: Primary data layer via REST API (`BACKEND_URL`)
+- **Agent State Management**: Conversation tracking, context storage, and memory persistence
 - **Anthropic Claude**: AI processing via API (`ANTHROPIC_API_KEY`) 
 - **Email Services**: Client communications via backend proxy
 - **Database**: Case and document data via backend API (Supabase PostgreSQL)
@@ -88,7 +93,17 @@ Primary chat interface for natural language processing.
 **Response:**
 ```json
 {
-  "response": "Found 3 cases for John Smith..."
+  "type": "agent_response",
+  "conversation_id": "conv_uuid",
+  "case_id": "case_uuid",
+  "response": "Found 3 cases for John Smith...",
+  "has_context": true,
+  "context_keys": ["client_preferences", "email_history"],
+  "metrics": {
+    "message_count": 5,
+    "conversation_health": "healthy",
+    "estimated_tokens": 1200
+  }
 }
 ```
 
@@ -211,6 +226,10 @@ The agent uses markdown templates in the `prompts/` directory:
   - `POST /api/cases` - Create new cases with document requirements  
   - `PUT /api/cases/documents/{doc_id}` - Update document status
   - `POST /api/send-email` - Send client communications
+  - `POST /api/agent/conversations` - Create agent conversations for state tracking
+  - `POST /api/agent/messages` - Store conversation messages and reasoning
+  - `POST /api/agent/context` - Store persistent case context and preferences
+  - `POST /api/agent/summaries` - Create conversation summaries for token optimization
 
 ### Email Service Integration
 
@@ -226,12 +245,23 @@ Email content generated using templates from `prompts/email_templates.md` with v
 
 ## Request Processing
 
-The agent operates as a stateless service:
+The agent operates as a stateful, context-aware service:
 
-- **Direct Processing**: Each request processed independently without session persistence
-- **Tool Execution**: Business logic executed through modular tools (case lookup, email sending, etc.)
+- **Conversation-Based Processing**: Each request processed within persistent conversations that maintain context
+- **Context Awareness**: Agent remembers client preferences, previous interactions, and case history
+- **Tool Execution**: Business logic executed through modular tools with conversation tracking
+- **Memory Management**: Intelligent summarization and context compression for long conversations
+- **Token Optimization**: Automatic context optimization to reduce AI processing costs
 - **Error Handling**: Structured error responses with user-friendly messages and recovery suggestions
 - **Timeouts**: 30-second HTTP client timeout, max 10 agent iterations per request
+
+### Stateful Features
+
+- **Conversation Continuity**: Maintains context across multiple interactions for the same case
+- **Client Preferences**: Remembers communication styles, contact preferences, and document requirements
+- **Interaction History**: Tracks email communications, document requests, and case progress
+- **Context Persistence**: Stores important findings and decisions for future reference
+- **Smart Summarization**: Automatically compresses old conversation context to manage token usage
 
 ## Testing
 
@@ -256,7 +286,9 @@ curl http://localhost:8082/
 ### Test Coverage
 
 - Case creation with document validation
-- Case lookup with fuzzy matching  
+- Case lookup with fuzzy matching
+- Conversation state management and context persistence
+- Token optimization and automatic summarization
 - Email template loading and composition
 - Backend API integration and error handling
 - Anthropic AI integration and error recovery
@@ -333,6 +365,9 @@ logger.error(f"❌ Request execution failed: {e}")
 - Backend API call duration and error rates
 - Anthropic API usage and error rates
 - Case creation and email automation rates
+- Conversation length and summarization effectiveness
+- Token usage optimization and cost savings
+- Context persistence and retrieval success rates
 
 ## Security
 
@@ -345,9 +380,10 @@ logger.error(f"❌ Request execution failed: {e}")
 ### Data Protection
 
 - **HTTPS Only**: All external API communications use TLS encryption
-- **No Local Storage**: Agent does not persist data locally - all data via backend API
+- **Centralized Storage**: All conversation and context data stored securely via backend API
 - **Input Validation**: Pydantic models validate all request inputs
 - **Error Handling**: User-friendly error messages without system details
+- **Context Security**: Client preferences and case context stored with appropriate access controls
 
 ### Container Security
 
@@ -359,10 +395,11 @@ logger.error(f"❌ Request execution failed: {e}")
 
 ### Scaling
 
-- **Stateless Design**: Each request processed independently, enabling horizontal scaling
+- **Stateful Architecture**: Conversations and context managed efficiently across instances
 - **Async Architecture**: FastAPI + asyncio for high concurrency
 - **Resource Requirements**: 1GB memory, 1 CPU core recommended for production
 - **Auto-scaling**: Cloud Run configured for 1-10 instances based on load
+- **Context Optimization**: Intelligent summarization reduces memory footprint for long conversations
 
 ### Known Limitations
 

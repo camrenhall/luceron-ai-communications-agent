@@ -8,6 +8,7 @@ import os
 import uuid
 from datetime import datetime
 from contextlib import asynccontextmanager
+from typing import Optional, Dict, Any
 
 # Add the current directory to Python path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -16,10 +17,12 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.config.settings import PORT
+from src.config.settings import PORT, BACKEND_URL
 from src.models.requests import ChatRequest
+from src.models.agent_state import MessageRole, AgentType
 from src.services.http_client import init_http_client, close_http_client, get_http_client
-from src.config.settings import BACKEND_URL
+from src.services.agent_state_manager import AgentStateManager
+from src.agents.callbacks import ConversationCallbackHandler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -67,55 +70,90 @@ async def status_check():
 async def chat_with_agent(request: ChatRequest):
     logger.info(f"📨 Incoming chat message: {request.message}")
     
-    async def generate_response():
-        """Generate direct response without workflow tracking"""
+    async def generate_stateful_response():
+        """Generate response with conversation tracking and context awareness"""
         from src.agents.communications import create_communications_agent
         
         try:
-            # Execute agent directly without workflow persistence
+            # Initialize agent state manager
+            state_manager = AgentStateManager()
+            
+            # Phase 1: Determine case context (if possible from message)
+            case_id = await _extract_case_id_from_message(request.message)
+            
+            # Phase 2: Start agent session with conversation and context loading
+            conversation_id, existing_context = await state_manager.start_agent_session(
+                user_message=request.message,
+                case_id=case_id
+            )
+            
+            # Phase 3: Manage conversation length with intelligent summarization
+            await state_manager.manage_conversation_length(conversation_id)
+            
+            # Phase 4: Prepare comprehensive agent context
+            agent_context = await state_manager.prepare_agent_context(
+                conversation_id, existing_context
+            )
+            
+            # Phase 5: Execute agent with conversation tracking and enhanced context
+            callback_handler = ConversationCallbackHandler(
+                conversation_id=conversation_id,
+                track_to_backend=True
+            )
+            
             agent = create_communications_agent()
-            result = await agent.ainvoke({"input": request.message})
             
-            # Extract the final response from the agent's output
-            if not result:
-                final_response = ""
-            else:
-                agent_output = result.get("output", "") if result else ""
-                
-                # Handle case where output is an array of message objects
-                if isinstance(agent_output, list) and len(agent_output) > 0:
-                    # Extract text from the first message object
-                    first_message = agent_output[0]
-                    if isinstance(first_message, dict) and "text" in first_message:
-                        final_response = first_message["text"]
-                    else:
-                        final_response = str(agent_output)
-                else:
-                    # Output is already a string or empty
-                    final_response = str(agent_output) if agent_output else ""
+            # Enhanced agent input with context
+            agent_input = {
+                "input": request.message,
+                "context": agent_context
+            }
             
-            logger.info(f"Agent completed with response length: {len(final_response)}")
+            result = await agent.ainvoke(
+                agent_input,
+                config={"callbacks": [callback_handler]}
+            )
             
-            # Send simple response event
+            # Phase 6: Extract and store final response
+            final_response = _extract_agent_response(result)
+            await callback_handler.store_final_response(final_response)
+            
+            # Phase 7: Store interaction results and update context
+            await state_manager.store_interaction_results(
+                case_id, final_response, result
+            )
+            
+            # Phase 8: Get conversation metrics
+            metrics = await state_manager.get_conversation_metrics(conversation_id)
+            
+            logger.info(f"✅ Agent completed with response length: {len(final_response)}")
+            
+            # Send enhanced response event with metrics
             response_data = {
                 'type': 'agent_response',
+                'conversation_id': conversation_id,
+                'case_id': case_id,
                 'timestamp': datetime.now().isoformat(),
-                'response': final_response
+                'response': final_response,
+                'has_context': bool(existing_context),
+                'context_keys': list(existing_context.keys()) if existing_context else [],
+                'metrics': metrics
             }
             yield f"data: {json.dumps(response_data)}\n\n"
                 
         except Exception as e:
-            logger.error(f"Agent execution failed: {e}")
+            logger.error(f"❌ Agent execution failed: {e}")
             error_data = {
                 'type': 'agent_error',
                 'timestamp': datetime.now().isoformat(),
                 'error_message': str(e),
-                'error_type': type(e).__name__
+                'error_type': type(e).__name__,
+                'recovery_suggestion': "Please try again or rephrase your request"
             }
             yield f"data: {json.dumps(error_data)}\n\n"
     
     return StreamingResponse(
-        generate_response(),
+        generate_stateful_response(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -123,6 +161,41 @@ async def chat_with_agent(request: ChatRequest):
             "X-Accel-Buffering": "no"  # Disable nginx buffering
         }
     )
+
+
+# ============================================================================
+# Helper Functions for Stateful Agent Processing
+# ============================================================================
+
+async def _extract_case_id_from_message(message: str) -> Optional[str]:
+    """Extract case_id from user message using basic heuristics"""
+    # TODO: Implement more sophisticated case_id extraction
+    # For now, let the agent's tools handle case lookup dynamically
+    # This could be enhanced to use NLP to detect case references
+    return None
+
+
+def _extract_agent_response(result) -> str:
+    """Extract the final response from agent output"""
+    if not result:
+        return ""
+    
+    agent_output = result.get("output", "") if result else ""
+    
+    # Handle case where output is an array of message objects
+    if isinstance(agent_output, list) and len(agent_output) > 0:
+        # Extract text from the first message object
+        first_message = agent_output[0]
+        if isinstance(first_message, dict) and "text" in first_message:
+            return first_message["text"]
+        else:
+            return str(agent_output)
+    else:
+        # Output is already a string or empty
+        return str(agent_output) if agent_output else ""
+
+
+# Context management is now handled by AgentStateManager
 
 
 if __name__ == "__main__":

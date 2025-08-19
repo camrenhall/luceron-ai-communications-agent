@@ -27,7 +27,7 @@ You can now handle requests like:
 9. **get_document_status** - Get document status
 10. **get_pending_reminders** - Get cases needing reminders
 
-## Enhanced Workflow
+## Enhanced Process
 
 ### For Name-Based Requests (NEW CAPABILITY)
 
@@ -44,7 +44,7 @@ You can now handle requests like:
 **If successful match (confidence 85-100%):**
 - Use `verify_case_details` to confirm the case
 - Proceed with `get_case_analysis` using the case_id
-- Continue with standard workflow
+- Continue with standard process
 
 **If multiple matches found:**
 - The lookup tool will provide clarification options
@@ -55,7 +55,7 @@ You can now handle requests like:
 - Check if the tool suggests closed cases or new case creation
 - Either ask about closed cases or offer to create a new case
 
-### For Case ID Requests (LEGACY WORKFLOW)
+### For Case ID Requests (LEGACY PROCESS)
 
 1. Use `get_case_analysis` directly with the provided case_id
 2. Use `compose_email` to create appropriate email
@@ -92,7 +92,7 @@ Before sending ANY email:
 User: "Tell Camren he needs to submit his W2"
 1. Use `lookup_case_by_name` with "Camren"
 2. If single match with high confidence: use `verify_case_details`
-3. If verification confirms: proceed with `get_case_analysis` and email workflow
+3. If verification confirms: proceed with `get_case_analysis` and email process
 
 ### Scenario 2: Multiple Matches
 User: "Send reminder to John about his documents"
@@ -139,7 +139,7 @@ When creating cases across multiple messages:
    - Message 2: "His email is john@email.com" 
    - **YOU MUST INCLUDE W2** in the create_case call!
 
-### Case Creation Workflow
+### Case Creation Process
 1. **Extract ALL requirements** from the conversation:
    - Client name (required)
    - Client email (required) 

@@ -18,11 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.config.settings import PORT
 from src.models.requests import ChatRequest
-from src.models.workflow import WorkflowState, WorkflowStatus
 from src.services.http_client import init_http_client, close_http_client, get_http_client
-from src.services.backend_api import create_workflow_state
-from src.services.workflow_service import execute_workflow, execute_workflow_with_streaming
-from src.services.streaming_coordinator import streaming_session, shutdown_streaming_coordinator
 from src.config.settings import BACKEND_URL
 
 # Configure logging
@@ -35,7 +31,6 @@ async def lifespan(app: FastAPI):
     await init_http_client()
     yield
     await close_http_client()
-    await shutdown_streaming_coordinator()
 
 
 app = FastAPI(
@@ -72,81 +67,47 @@ async def status_check():
 async def chat_with_agent(request: ChatRequest):
     logger.info(f"📨 Incoming chat message: {request.message}")
     
-    # Create workflow for auditing/tracking and get backend-generated workflow_id
-    state = WorkflowState(
-        status=WorkflowStatus.PENDING,
-        initial_prompt=request.message,
-        reasoning_chain=[],
-        created_at=datetime.now()
-    )
-    
-    workflow_id = await create_workflow_state(state)
-    
-    async def generate_enhanced_stream():
-        """Enhanced streaming generator with real-time agent reasoning"""
-        import asyncio
-        from src.services.streaming_coordinator import get_streaming_coordinator
+    async def generate_response():
+        """Generate direct response without workflow tracking"""
+        from src.agents.communications import create_communications_agent
         
         try:
-            # Get coordinator and create stream
-            coordinator = await get_streaming_coordinator()
+            # Execute agent directly without workflow persistence
+            agent = create_communications_agent()
+            result = await agent.ainvoke({"input": request.message})
             
-            # Execute workflow and stream events concurrently
-            async def execute_workflow_task():
-                try:
-                    final_response = await execute_workflow_with_streaming(workflow_id, request.message)
-                    logger.info(f"Workflow {workflow_id} execution completed")
-                    return final_response
-                except Exception as e:
-                    logger.error(f"Workflow {workflow_id} execution failed: {e}")
-                    raise
-            
-            # Start workflow execution
-            workflow_task = asyncio.create_task(execute_workflow_task())
-            
-            # Stream events from coordinator
-            try:
-                async for event in coordinator.create_stream(workflow_id, request.message):
-                    if event:
-                        event_data = event.model_dump()
-                        # Convert datetime to ISO string for JSON serialization
-                        if 'timestamp' in event_data:
-                            event_data['timestamp'] = event.timestamp.isoformat()
-                        
-                        yield f"data: {json.dumps(event_data)}\n\n"
-                        
-                        # Check if workflow completed
-                        if event.type == "workflow_completed":
-                            break
-                        elif event.type == "workflow_error":
-                            break
-                            
-            except Exception as e:
-                logger.error(f"Error in event stream for workflow {workflow_id}: {e}")
+            # Extract the final response from the agent's output
+            if not result:
+                final_response = ""
+            else:
+                agent_output = result.get("output", "") if result else ""
                 
-                # Send error event
-                error_data = {
-                    'type': 'workflow_error',
-                    'workflow_id': workflow_id,
-                    'timestamp': datetime.now().isoformat(),
-                    'error_message': str(e),
-                    'error_type': type(e).__name__
-                }
-                yield f"data: {json.dumps(error_data)}\n\n"
+                # Handle case where output is an array of message objects
+                if isinstance(agent_output, list) and len(agent_output) > 0:
+                    # Extract text from the first message object
+                    first_message = agent_output[0]
+                    if isinstance(first_message, dict) and "text" in first_message:
+                        final_response = first_message["text"]
+                    else:
+                        final_response = str(agent_output)
+                else:
+                    # Output is already a string or empty
+                    final_response = str(agent_output) if agent_output else ""
             
-            # Ensure workflow task completes
-            if not workflow_task.done():
-                try:
-                    await asyncio.wait_for(workflow_task, timeout=5.0)
-                except asyncio.TimeoutError:
-                    logger.warning(f"Workflow {workflow_id} did not complete within timeout")
-                    workflow_task.cancel()
+            logger.info(f"Agent completed with response length: {len(final_response)}")
+            
+            # Send simple response event
+            response_data = {
+                'type': 'agent_response',
+                'timestamp': datetime.now().isoformat(),
+                'response': final_response
+            }
+            yield f"data: {json.dumps(response_data)}\n\n"
                 
         except Exception as e:
-            logger.error(f"Critical error in chat streaming for workflow {workflow_id}: {e}")
+            logger.error(f"Agent execution failed: {e}")
             error_data = {
-                'type': 'workflow_error',
-                'workflow_id': workflow_id,
+                'type': 'agent_error',
                 'timestamp': datetime.now().isoformat(),
                 'error_message': str(e),
                 'error_type': type(e).__name__
@@ -154,7 +115,7 @@ async def chat_with_agent(request: ChatRequest):
             yield f"data: {json.dumps(error_data)}\n\n"
     
     return StreamingResponse(
-        generate_enhanced_stream(),
+        generate_response(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -162,70 +123,6 @@ async def chat_with_agent(request: ChatRequest):
             "X-Accel-Buffering": "no"  # Disable nginx buffering
         }
     )
-
-
-@app.get("/api/workflows/{workflow_id}")
-async def get_workflow(workflow_id: str):
-    """Get workflow details and final response for fallback access"""
-    try:
-        logger.info(f"🔍 Retrieving workflow details for {workflow_id}")
-        
-        # Forward request to backend API
-        http_client = get_http_client()
-        response = await http_client.get(f"{BACKEND_URL}/api/workflows/{workflow_id}")
-        response.raise_for_status()
-        
-        workflow_data = response.json()
-        logger.info(f"✅ Retrieved workflow {workflow_id} with status: {workflow_data.get('status', 'unknown')}")
-        
-        return workflow_data
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to retrieve workflow {workflow_id}: {e}")
-        from fastapi import HTTPException
-        
-        if hasattr(e, 'status_code'):
-            if e.status_code == 404:
-                raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
-            elif e.status_code == 403:
-                raise HTTPException(status_code=403, detail="Access denied to workflow data")
-        
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve workflow: {str(e)}")
-
-
-@app.get("/api/workflows/{workflow_id}/status")
-async def get_workflow_status(workflow_id: str):
-    """Get workflow status only (lightweight endpoint)"""
-    try:
-        logger.info(f"📊 Checking status for workflow {workflow_id}")
-        
-        # Forward request to backend API
-        http_client = get_http_client()
-        response = await http_client.get(f"{BACKEND_URL}/api/workflows/{workflow_id}")
-        response.raise_for_status()
-        
-        workflow_data = response.json()
-        
-        # Return minimal status information
-        status_info = {
-            "workflow_id": workflow_id,
-            "status": workflow_data.get("status", "UNKNOWN"),
-            "created_at": workflow_data.get("created_at"),
-            "updated_at": workflow_data.get("updated_at"),
-            "has_final_response": bool(workflow_data.get("final_response"))
-        }
-        
-        logger.info(f"📊 Workflow {workflow_id} status: {status_info['status']}")
-        return status_info
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to get status for workflow {workflow_id}: {e}")
-        from fastapi import HTTPException
-        
-        if hasattr(e, 'status_code') and e.status_code == 404:
-            raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
-        
-        raise HTTPException(status_code=500, detail=f"Failed to get workflow status: {str(e)}")
 
 
 if __name__ == "__main__":

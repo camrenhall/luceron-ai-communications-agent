@@ -2,7 +2,7 @@
 
 ## Component Overview
 
-The **Luceron AI Communications Agent** is the client-facing interface component of the Luceron AI eDiscovery Platform, a distributed system designed to automate document collection workflows in legal discovery processes. This component serves as the primary point of contact for law firm clients, enabling natural language interaction for case management, document requests, and automated client communications.
+The **Luceron AI Communications Agent** is the client-facing interface component of the Luceron AI eDiscovery Platform, a distributed system designed to automate document collection processes in legal discovery. This component serves as the primary point of contact for law firm clients, enabling natural language interaction for case management, document requests, and automated client communications.
 
 ### Primary Purpose and Responsibilities
 
@@ -10,7 +10,6 @@ The **Luceron AI Communications Agent** is the client-facing interface component
 - **Intelligent Case Discovery**: Automatically locate cases using fuzzy name matching and disambiguation
 - **Document Collection Automation**: Streamline the process of requesting and tracking legal documents from clients
 - **Email Communication Management**: Automate initial contact, follow-up reminders, and urgent communications
-- **Real-time Workflow Streaming**: Provide live visibility into AI agent reasoning and decision-making processes
 - **Case Creation and Management**: Enable rapid creation of new cases with document requirements
 
 ### Position Within System Architecture
@@ -49,7 +48,6 @@ graph TB
 - **Document Request Bottlenecks**: Automates the creation and tracking of document requests
 - **Communication Overhead**: Reduces manual email composition and follow-up management by 70%+
 - **Human Error Reduction**: Prevents incorrect client communications through verification protocols
-- **Workflow Visibility**: Provides real-time insight into AI decision-making for human oversight
 
 ## Technical Architecture
 
@@ -70,13 +68,11 @@ graph TB
 
 #### 1. Agent-Based Architecture
 - **LangChain Agent Framework**: Implements a tool-calling agent pattern with ReAct (Reasoning and Acting) paradigm
-- **Tool Composition**: Modular tool design enabling flexible workflow composition
-- **Callback System**: Real-time streaming of agent reasoning steps and tool executions
+- **Tool Composition**: Modular tool design enabling flexible request processing
 
 #### 2. Service Layer Pattern
 - **Backend API Integration**: Centralized service layer for all external API communications
 - **HTTP Client Management**: Singleton pattern with lifecycle management and authentication
-- **Streaming Coordination**: Event-driven architecture for real-time user experience
 
 #### 3. Command Pattern
 - **Tool Implementation**: Each business operation (case creation, email sending, etc.) implemented as a discrete tool
@@ -96,7 +92,7 @@ graph TB
 
 #### External Integration Points
 - **Anthropic Claude API**: Natural language processing and reasoning
-- **Backend REST API**: Case management, document tracking, workflow persistence
+- **Backend REST API**: Case management, document tracking
 - **Email Services**: Via backend proxy for SMTP/API email delivery
 - **Database**: Via backend API for Supabase PostgreSQL operations
 
@@ -121,15 +117,15 @@ sequenceDiagram
     Tools-->>Agent: Tool Results
     Agent->>AI: Continue Reasoning
     AI-->>Agent: Final Response
-    Agent-->>Client: Streaming Events + Final Result
+    Agent-->>Client: Final Result
 ```
 
 ## API Documentation
 
 ### Endpoints
 
-#### 1. **POST /chat** - Primary Streaming Interface
-Enhanced streaming chat endpoint with real-time agent reasoning visibility.
+#### 1. **POST /chat** - Primary Chat Interface
+Main chat endpoint for natural language processing.
 
 **Request Schema:**
 ```json
@@ -138,77 +134,14 @@ Enhanced streaming chat endpoint with real-time agent reasoning visibility.
 }
 ```
 
-**Response:** Server-Sent Events (SSE) stream with the following event types:
-
-**workflow_started**
-```json
-{
-  "type": "workflow_started",
-  "workflow_id": "wf_uuid",
-  "timestamp": "2025-08-19T15:30:00.000Z",
-  "initial_prompt": "User's request",
-  "agent_type": "CommunicationsAgent"
-}
-```
-
-**reasoning_step**
-```json
-{
-  "type": "reasoning_step", 
-  "workflow_id": "wf_uuid",
-  "timestamp": "2025-08-19T15:30:01.500Z",
-  "step_id": "step_uuid",
-  "thought": "Agent's reasoning",
-  "action": "ToolName",
-  "action_input": {},
-  "step_number": 1
-}
-```
-
-**workflow_completed**
-```json
-{
-  "type": "workflow_completed",
-  "workflow_id": "wf_uuid", 
-  "timestamp": "2025-08-19T15:30:15.000Z",
-  "final_response": "Agent's final response",
-  "total_steps": 5,
-  "execution_time_ms": 15000,
-  "tools_used": ["ToolName1", "ToolName2"]
-}
-```
-
-#### 2. **GET /api/workflows/{workflow_id}** - Workflow Data Retrieval
-Fallback endpoint for complete workflow data access.
-
 **Response Schema:**
 ```json
 {
-  "workflow_id": "string",
-  "status": "COMPLETED|PROCESSING|FAILED",
-  "initial_prompt": "string",
-  "final_response": "string",
-  "created_at": "ISO8601",
-  "updated_at": "ISO8601",
-  "reasoning_chain": []
+  "response": "string - Agent's response to the request"
 }
 ```
 
-#### 3. **GET /api/workflows/{workflow_id}/status** - Lightweight Status Check
-Minimal endpoint for workflow status polling.
-
-**Response Schema:**
-```json
-{
-  "workflow_id": "string",
-  "status": "COMPLETED|PROCESSING|FAILED",
-  "created_at": "ISO8601", 
-  "updated_at": "ISO8601",
-  "has_final_response": boolean
-}
-```
-
-#### 4. **GET /** - Health Check
+#### 2. **GET /** - Health Check
 Application health and backend connectivity check.
 
 **Response Schema:**
@@ -219,7 +152,7 @@ Application health and backend connectivity check.
 }
 ```
 
-#### 5. **GET /status** - Service Status
+#### 3. **GET /status** - Service Status
 Simple service status endpoint.
 
 **Response Schema:**
@@ -246,10 +179,7 @@ Simple service status endpoint.
 #### Error Response Format
 ```json
 {
-  "type": "workflow_error",
-  "workflow_id": "string",
-  "timestamp": "ISO8601",
-  "error_message": "User-friendly error message",
+  "error": "User-friendly error message",
   "error_type": "ErrorClassName", 
   "recovery_suggestion": "Actionable guidance"
 }
@@ -372,7 +302,6 @@ Markdown-based prompt templates for agent behavior:
 
 Currently implemented features (no toggles required):
 - ✅ Natural language case lookup with fuzzy matching
-- ✅ Real-time streaming of agent reasoning
 - ✅ Automatic email composition and sending
 - ✅ Multi-message context preservation for case creation
 - ✅ Document requirement validation
@@ -398,10 +327,6 @@ The Communications Agent does not directly access the database. All database ope
 - **Query Operations**: Historical email lookup, email logging for audit
 - **Transaction Boundaries**: Email logging is separate from sending operation
 
-#### 4. **workflow_states** - Agent Execution Tracking
-- **Access Pattern**: Create workflow records, update status, store reasoning chains
-- **Query Operations**: Workflow creation, status updates, final response storage
-- **Transaction Boundaries**: Workflow updates are atomic per workflow ID
 
 #### 5. **error_logs** - System Error Tracking
 - **Access Pattern**: Write error logs for debugging and monitoring
@@ -473,7 +398,7 @@ agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, max_itera
 #### Usage Patterns
 - **Tool-Calling Agent**: Implements ReAct (Reasoning and Acting) pattern
 - **System Prompts**: Loaded from markdown files for maintainable AI behavior
-- **Conversation Context**: Maintains context across tool executions within single workflow
+- **Conversation Context**: Maintains context across tool executions within single request
 - **Error Handling**: Graceful handling of AI service overload and timeout scenarios
 
 ### 2. Backend API Integration
@@ -505,10 +430,6 @@ http_client = httpx.AsyncClient(
 **Document Operations**
 - `PUT /api/cases/documents/{doc_id}` - Update document status and notes
 
-**Workflow Management**
-- `POST /api/workflows` - Create workflow state for auditing
-- `PUT /api/workflows/{workflow_id}` - Update workflow status and final response
-- `POST /api/workflows/{workflow_id}/reasoning-step` - Add reasoning step
 
 **Communication Services**
 - `POST /api/send-email` - Send emails via backend email service
@@ -570,83 +491,19 @@ case_data = await get_case_with_documents(case_id)
 analyzed_docs = [doc for doc in case_data["documents"] if doc.get("analysis_completed")]
 ```
 
-## Event Handling and Messaging
+## Request Processing
 
-### Real-Time Streaming Architecture
+### Stateless Architecture
 
-The Communications Agent implements a sophisticated streaming coordinator for real-time workflow visibility:
+The Communications Agent operates as a stateless service that processes requests directly without persistence:
 
-#### Event Types Produced
-
-1. **workflow_started** - Workflow initialization
-2. **reasoning_step** - Agent decision-making steps  
-3. **tool_start** - Tool execution initiation
-4. **tool_end** - Tool execution completion with results
-5. **agent_thinking** - Internal reasoning and planning
-6. **workflow_completed** - Final response with metadata
-7. **workflow_error** - Error handling with recovery suggestions
-8. **heartbeat** - Connection health monitoring
-
-#### Streaming Coordinator (`src/services/streaming_coordinator.py`)
-
-```python
-class StreamingCoordinator:
-    def __init__(self):
-        self._streams: Dict[str, StreamingState] = {}
-        self._cleanup_task: Optional[asyncio.Task] = None
-        self._lock = asyncio.Lock()
-    
-    async def create_stream(self, workflow_id: str, initial_prompt: str):
-        """Create and return an async generator for streaming events"""
-        # Implementation details...
-```
-
-#### Key Features
-- **Asynchronous Queue Management**: Non-blocking event queues per workflow
-- **Concurrent Stream Support**: Multiple simultaneous workflow streams
-- **Automatic Cleanup**: Background cleanup of inactive streams (1-hour timeout)
-- **Memory Efficiency**: Configurable queue limits (1000 events max)
-- **Connection Health**: Heartbeat events every 30 seconds
-
-### Event Flow Pattern
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant FastAPI
-    participant Coordinator
-    participant Agent
-    participant Tools
-
-    Client->>FastAPI: POST /chat
-    FastAPI->>Coordinator: create_stream(workflow_id)
-    FastAPI->>Agent: execute_workflow_with_streaming()
-    
-    loop Agent Execution
-        Agent->>Tools: Tool execution
-        Tools->>Coordinator: emit_event(tool_start)
-        Coordinator->>Client: SSE: tool_start
-        Tools->>Coordinator: emit_event(tool_end)
-        Coordinator->>Client: SSE: tool_end
-    end
-    
-    Agent->>Coordinator: emit_event(workflow_completed)
-    Coordinator->>Client: SSE: workflow_completed
-    Coordinator->>Coordinator: cleanup_stream()
-```
+#### Processing Pattern
+- **Direct Processing**: Each request is processed independently
+- **No State Persistence**: No state is maintained between requests
+- **Immediate Response**: Responses are returned directly after processing
+- **Tool Execution**: Business logic executed through modular tools
 
 ### Error Handling and Recovery
-
-#### Error Event Structure
-```python
-@dataclass
-class WorkflowErrorEvent:
-    workflow_id: str
-    error_message: str  # User-friendly message
-    error_type: str     # Exception class name
-    recovery_suggestion: Optional[str] = None
-    partial_response: Optional[str] = None
-```
 
 #### Error Classification and Recovery
 ```python
@@ -665,45 +522,8 @@ elif "timeout" in str(e).lower():
 
 #### Retry Logic
 - **HTTP Client**: 30-second timeout per request
-- **Streaming**: Heartbeat-based connection monitoring
 - **Agent Execution**: Max 10 iterations with early termination on errors
 - **No Automatic Retry**: Immediate error reporting for user visibility
-
-### Message Persistence
-
-#### Workflow State Tracking
-All workflow execution is persisted to the backend database for audit and recovery:
-
-```python
-# Create workflow record
-workflow_id = await create_workflow_state(WorkflowState(
-    status=WorkflowStatus.PENDING,
-    initial_prompt=request.message,
-    reasoning_chain=[],
-    created_at=datetime.now()
-))
-
-# Update with final response
-await update_workflow(
-    workflow_id,
-    status=WorkflowStatus.COMPLETED, 
-    final_response=final_response
-)
-```
-
-#### Reasoning Step Persistence
-Individual reasoning steps are stored for debugging and compliance:
-
-```python
-step = ReasoningStep(
-    timestamp=datetime.now(),
-    thought=thought,
-    action=action_name,
-    action_input=action_input,
-    action_output=result
-)
-await add_reasoning_step(workflow_id, step)
-```
 
 ## Testing
 
@@ -746,17 +566,13 @@ python test_case_creation_fix.py
 
 #### Manual Testing with CURL
 ```bash
-# Test streaming endpoint
-curl -N -H "Accept: text/event-stream" \
-     -H "Content-Type: application/json" \
+# Test chat endpoint
+curl -H "Content-Type: application/json" \
      -d '{"message": "Find cases for John Smith"}' \
      http://localhost:8082/chat
 
 # Test health check
 curl http://localhost:8082/
-
-# Test workflow retrieval
-curl http://localhost:8082/api/workflows/wf_12345abc
 ```
 
 ### Test Coverage Requirements
@@ -771,8 +587,6 @@ curl http://localhost:8082/api/workflows/wf_12345abc
 #### Integration Points
 - ✅ Backend API authentication and error handling
 - ✅ Anthropic AI integration and error recovery
-- ✅ Streaming event generation and coordination
-- ✅ Workflow state persistence
 
 #### Error Scenarios
 - ✅ Missing environment variables
@@ -917,7 +731,7 @@ gcloud run services replace service.yaml --region=us-central1
 
 #### 4. **Validation Post-Rollback**
 - Health check returns 200 OK
-- Sample workflow execution succeeds
+- Sample request execution succeeds
 - Backend connectivity verified
 - AI service integration working
 
@@ -933,23 +747,23 @@ logger = logging.getLogger(__name__)
 
 # Standard log levels and formats
 logger.info(f"📨 Incoming chat message: {request.message}")
-logger.info(f"✅ Workflow {workflow_id} completed with response length: {len(final_response)}")
-logger.error(f"❌ Workflow {workflow_id} execution failed: {e}")
-logger.warning(f"⚠️ Workflow {workflow_id} did not complete within timeout")
+logger.info(f"✅ Request completed with response length: {len(final_response)}")
+logger.error(f"❌ Request execution failed: {e}")
+logger.warning(f"⚠️ Request did not complete within timeout")
 ```
 
 #### 2. **Log Categories**
 - **🚀 Startup/Shutdown**: Application lifecycle events
-- **📨 Request Processing**: Incoming requests and workflow creation
+- **📨 Request Processing**: Incoming requests and processing
 - **🔄 Tool Execution**: Individual tool invocations and results
-- **✅ Success Events**: Completed workflows and successful operations
+- **✅ Success Events**: Completed requests and successful operations
 - **❌ Error Events**: Failures, timeouts, and exceptions
 - **📊 Performance**: Execution times and resource usage
 - **🔍 Debug**: Detailed debugging information
 
 #### 3. **Contextual Information**
 All logs include:
-- **workflow_id**: Unique identifier for request tracing
+- **request_id**: Unique identifier for request tracing
 - **timestamp**: ISO 8601 formatted timestamps
 - **execution_time_ms**: Performance metrics where applicable
 - **tool_name**: Current tool being executed
@@ -959,16 +773,16 @@ All logs include:
 
 #### 1. **Application Metrics**
 ```python
-# Workflow execution metrics
-workflow_duration_histogram = {
-    "name": "workflow_execution_duration_ms",
-    "description": "Time taken to complete workflows",
+# Request execution metrics
+request_duration_histogram = {
+    "name": "request_execution_duration_ms",
+    "description": "Time taken to complete requests",
     "labels": ["status", "tools_used"]
 }
 
-workflow_counter = {
-    "name": "workflows_total",
-    "description": "Total number of workflows processed",
+request_counter = {
+    "name": "requests_total",
+    "description": "Total number of requests processed",
     "labels": ["status"]
 }
 
@@ -1043,13 +857,12 @@ Continuous health validation:
 - **Memory Exhaustion**: Memory usage >90% for >10 minutes
 
 #### 2. **Warning Alerts** (Response within 1 hour)
-- **High Error Rate**: >10% of workflows failing for >15 minutes
+- **High Error Rate**: >10% of requests failing for >15 minutes
 - **Slow Response Time**: p95 response time >30 seconds for >10 minutes
 - **High Tool Failure Rate**: Tool execution failures >20% for >30 minutes
-- **Stream Connection Issues**: >50% SSE disconnections for >5 minutes
 
 #### 3. **Info Alerts** (Daily Review)
-- **Usage Spikes**: 2x normal workflow volume
+- **Usage Spikes**: 2x normal request volume
 - **New Error Types**: Previously unseen error patterns
 - **Performance Degradation**: 20%+ slower than baseline
 - **Configuration Changes**: Environment variable updates
@@ -1068,8 +881,8 @@ Continuous health validation:
 - Response time percentiles
 - Active connections and throughput
 
-#### 2. **Workflow Execution**
-- Workflows processed per hour/day
+#### 2. **Request Execution**
+- Requests processed per hour/day
 - Average execution time trends
 - Tool usage distribution
 - Success/failure rate trends
@@ -1266,7 +1079,7 @@ spec:
 - **CPU Pattern**: Bursty during tool execution, idle during streaming
 
 #### 3. **Network Requirements**
-- **Bandwidth**: ~1KB per streaming event, ~100KB per workflow completion
+- **Bandwidth**: ~100KB per request completion
 - **Connections**: Persistent connections to backend API and Anthropic AI
 - **Latency Sensitivity**: <100ms to backend API, <2s to AI service
 
@@ -1329,9 +1142,8 @@ agent_executor = AgentExecutor(
 
 #### 1. **AI Service Latency**
 - **Issue**: Anthropic API response times can vary (2-30 seconds)
-- **Impact**: Affects overall workflow completion time
+- **Impact**: Affects overall request completion time
 - **Mitigation**: 
-  - Real-time streaming keeps users informed during processing
   - Timeout handling with user-friendly error messages
   - Performance monitoring to track AI service patterns
 
@@ -2128,10 +1940,10 @@ class CacheService:
 - User experience monitoring
 
 **Business Intelligence Dashboard**:
-- Real-time workflow completion rates
+- Real-time request completion rates
 - Client response time analytics
 - Document collection success metrics
-- Cost per workflow analysis
+- Cost per request analysis
 
 #### 4. **Security Enhancements**
 **Advanced Authentication**:

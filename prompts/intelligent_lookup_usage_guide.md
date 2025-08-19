@@ -68,7 +68,7 @@ The system intelligently requests the minimum information needed:
 - Handles typos and name variations gracefully  
 - Provides clear feedback when uncertain
 
-## Example Workflows
+## Example Processes
 
 ### Successful High-Confidence Match
 ```

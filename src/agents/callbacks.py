@@ -85,7 +85,13 @@ class StreamingWorkflowCallbackHandler(BaseCallbackHandler):
     async def on_tool_start(self, serialized: Dict[str, Any], input_str: str, **kwargs):
         """Called when a tool starts execution"""
         coordinator = await self._get_coordinator()
-        tool_name = serialized.get('name', 'Unknown')
+        
+        # Handle None serialized parameter
+        tool_name = "Unknown"
+        tool_description = None
+        if serialized and isinstance(serialized, dict):
+            tool_name = serialized.get('name', 'Unknown')
+            tool_description = serialized.get('description')
         
         # Track tool start time
         self.active_tools[tool_name] = time.time()
@@ -107,7 +113,7 @@ class StreamingWorkflowCallbackHandler(BaseCallbackHandler):
             timestamp=datetime.now(),
             tool_name=tool_name,
             tool_input=tool_input,
-            description=serialized.get('description')
+            description=tool_description
         )
         
         # Stream to frontend
@@ -229,7 +235,10 @@ class StreamingWorkflowCallbackHandler(BaseCallbackHandler):
         """Called when a chain starts"""
         coordinator = await self._get_coordinator()
         
-        chain_name = serialized.get('name', 'Unknown Chain')
+        # Handle None serialized parameter
+        chain_name = "Unknown Chain"
+        if serialized and isinstance(serialized, dict):
+            chain_name = serialized.get('name', 'Unknown Chain')
         
         # Create agent thinking event
         thinking_event = AgentThinkingEvent(

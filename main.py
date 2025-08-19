@@ -85,40 +85,14 @@ async def chat_with_agent(request: ChatRequest):
     async def generate_enhanced_stream():
         """Enhanced streaming generator with real-time agent reasoning"""
         import asyncio
-        from src.models.streaming import StreamEvent
+        from src.services.streaming_coordinator import get_streaming_coordinator
         
         try:
-            # Start streaming session
-            stream_task = None
-            workflow_task = None
+            # Get coordinator and create stream
+            coordinator = await get_streaming_coordinator()
             
-            async def stream_events():
-                """Stream real-time events from the streaming coordinator"""
-                try:
-                    async with streaming_session(workflow_id, request.message) as event_stream:
-                        async for event in event_stream:
-                            if event:
-                                event_data = event.model_dump()
-                                # Convert datetime to ISO string for JSON serialization
-                                if 'timestamp' in event_data:
-                                    event_data['timestamp'] = event.timestamp.isoformat()
-                                
-                                yield f"data: {json.dumps(event_data)}\n\n"
-                except asyncio.CancelledError:
-                    logger.info(f"Stream task cancelled for workflow {workflow_id}")
-                except Exception as e:
-                    logger.error(f"Error in stream task for workflow {workflow_id}: {e}")
-                    error_data = {
-                        'type': 'workflow_error',
-                        'workflow_id': workflow_id,
-                        'timestamp': datetime.now().isoformat(),
-                        'error_message': str(e),
-                        'error_type': type(e).__name__
-                    }
-                    yield f"data: {json.dumps(error_data)}\n\n"
-            
-            async def execute_agent_workflow():
-                """Execute the agent workflow in parallel with streaming"""
+            # Execute workflow and stream events concurrently
+            async def execute_workflow_task():
                 try:
                     final_response = await execute_workflow_with_streaming(workflow_id, request.message)
                     logger.info(f"Workflow {workflow_id} execution completed")
@@ -127,60 +101,30 @@ async def chat_with_agent(request: ChatRequest):
                     logger.error(f"Workflow {workflow_id} execution failed: {e}")
                     raise
             
-            # Start both streaming and workflow execution concurrently
-            stream_generator = stream_events()
-            workflow_task = asyncio.create_task(execute_agent_workflow())
+            # Start workflow execution
+            workflow_task = asyncio.create_task(execute_workflow_task())
             
-            # Stream events until workflow completes
-            workflow_completed = False
-            
+            # Stream events from coordinator
             try:
-                while not workflow_completed:
-                    # Check if workflow is done
-                    if workflow_task.done():
-                        workflow_completed = True
-                        # Get any remaining events
-                        try:
-                            async for event_data in stream_generator:
-                                yield event_data
-                        except:
-                            pass
-                        break
-                    
-                    # Get next event with timeout
-                    try:
-                        event_data = await asyncio.wait_for(
-                            stream_generator.__anext__(),
-                            timeout=1.0
-                        )
-                        yield event_data
-                    except asyncio.TimeoutError:
-                        # Check workflow status and continue
-                        continue
-                    except StopAsyncIteration:
-                        # Stream ended, wait for workflow to complete
-                        if not workflow_task.done():
-                            await workflow_task
-                        break
-                    except Exception as e:
-                        logger.error(f"Error getting stream event: {e}")
-                        break
-                
-                # Ensure workflow task completes
-                if not workflow_task.done():
-                    final_response = await workflow_task
-                
+                async for event in coordinator.create_stream(workflow_id, request.message):
+                    if event:
+                        event_data = event.model_dump()
+                        # Convert datetime to ISO string for JSON serialization
+                        if 'timestamp' in event_data:
+                            event_data['timestamp'] = event.timestamp.isoformat()
+                        
+                        yield f"data: {json.dumps(event_data)}\n\n"
+                        
+                        # Check if workflow completed
+                        if event.type == "workflow_completed":
+                            break
+                        elif event.type == "workflow_error":
+                            break
+                            
             except Exception as e:
-                logger.error(f"Error in streaming loop for workflow {workflow_id}: {e}")
-                # Cancel workflow task if still running
-                if workflow_task and not workflow_task.done():
-                    workflow_task.cancel()
-                    try:
-                        await workflow_task
-                    except asyncio.CancelledError:
-                        pass
+                logger.error(f"Error in event stream for workflow {workflow_id}: {e}")
                 
-                # Send final error event
+                # Send error event
                 error_data = {
                     'type': 'workflow_error',
                     'workflow_id': workflow_id,
@@ -189,6 +133,14 @@ async def chat_with_agent(request: ChatRequest):
                     'error_type': type(e).__name__
                 }
                 yield f"data: {json.dumps(error_data)}\n\n"
+            
+            # Ensure workflow task completes
+            if not workflow_task.done():
+                try:
+                    await asyncio.wait_for(workflow_task, timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Workflow {workflow_id} did not complete within timeout")
+                    workflow_task.cancel()
                 
         except Exception as e:
             logger.error(f"Critical error in chat streaming for workflow {workflow_id}: {e}")

@@ -100,11 +100,32 @@ async def execute_workflow_with_streaming(workflow_id: str, initial_prompt: str)
         # Update status to failed
         await update_workflow_status(workflow_id, WorkflowStatus.FAILED)
         
-        # Notify streaming coordinator of error
+        # Extract user-friendly error message and recovery suggestion
+        error_message = str(e)
+        recovery_suggestion = None
+        
+        # Handle specific error types
+        if isinstance(e, dict) and e.get('type') == 'error':
+            error_data = e.get('error', {})
+            error_type = error_data.get('type', 'unknown_error')
+            error_message = error_data.get('message', str(e))
+            
+            if error_type == 'overloaded_error':
+                error_message = "The AI service is currently overloaded"
+                recovery_suggestion = "Please try again in a few moments"
+        elif "overloaded" in str(e).lower():
+            error_message = "The AI service is currently overloaded"
+            recovery_suggestion = "Please try again in a few moments"
+        elif "timeout" in str(e).lower():
+            error_message = "Request timed out"
+            recovery_suggestion = "Please try again"
+        
+        # Notify streaming coordinator of error with enhanced details
         await coordinator.error_workflow(
             workflow_id,
-            str(e),
-            type(e).__name__
+            error_message,
+            type(e).__name__ if not isinstance(e, dict) else "APIError",
+            recovery_suggestion
         )
         
         raise

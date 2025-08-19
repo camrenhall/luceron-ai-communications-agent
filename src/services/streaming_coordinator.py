@@ -160,13 +160,15 @@ class StreamingCoordinator:
         await self._terminate_stream(workflow_id)
     
     async def error_workflow(self, workflow_id: str, error_message: str, 
-                           error_type: str, partial_response: Optional[str] = None) -> None:
+                           error_type: str, recovery_suggestion: Optional[str] = None,
+                           partial_response: Optional[str] = None) -> None:
         """Mark workflow as failed and send error event"""
         error_event = WorkflowErrorEvent(
             workflow_id=workflow_id,
             timestamp=datetime.now(),
             error_message=error_message,
             error_type=error_type,
+            recovery_suggestion=recovery_suggestion,
             partial_response=partial_response
         )
         
@@ -277,8 +279,8 @@ async def streaming_session(workflow_id: str, initial_prompt: str):
     coordinator = await get_streaming_coordinator()
     
     try:
-        async for event in coordinator.create_stream(workflow_id, initial_prompt):
-            yield event
+        # Yield the async generator itself, not iterate through it
+        yield coordinator.create_stream(workflow_id, initial_prompt)
     finally:
         # Cleanup handled by coordinator
         pass

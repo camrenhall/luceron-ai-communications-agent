@@ -1,11 +1,14 @@
 """
 Backend API integration service
 """
+import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from src.config.settings import BACKEND_URL
 from src.services.http_client import get_http_client
+
+logger = logging.getLogger(__name__)
 
 
 # Requested Documents API Functions
@@ -112,12 +115,35 @@ async def get_conversation_with_messages(
     return response.json()
 
 
-async def get_or_create_conversation(agent_type: str = "CommunicationsAgent") -> str:
-    """Get existing active conversation or create new one for agent"""
+async def get_or_create_conversation(
+    agent_type: str = "CommunicationsAgent",
+    conversation_id: Optional[str] = None
+) -> str:
+    """Get existing conversation by ID or create new one for agent"""
     http_client = get_http_client()
     
-    # For now, always create a new conversation
-    # In the future, could implement conversation reuse logic if needed
+    # If conversation_id is provided, validate it exists and is active
+    if conversation_id:
+        try:
+            response = await http_client.get(
+                f"{BACKEND_URL}/api/agent/conversations/{conversation_id}"
+            )
+            if response.status_code == 200:
+                conversation = response.json()
+                # Verify conversation is active and matches agent type
+                if conversation.get("status") == "ACTIVE" and conversation.get("agent_type") == agent_type:
+                    return conversation_id
+                else:
+                    # Conversation exists but is inactive or wrong agent type
+                    raise ValueError(f"Conversation {conversation_id} is not active or does not match agent type {agent_type}")
+            else:
+                # Conversation doesn't exist
+                raise ValueError(f"Conversation {conversation_id} not found")
+        except Exception as e:
+            # If there's any error with the provided conversation_id, create a new one
+            print(f"Warning: Could not use conversation {conversation_id}: {e}")
+    
+    # Create new conversation if no ID provided or existing one is invalid
     new_conversation = await create_conversation(agent_type)
     return new_conversation["conversation_id"]
 
@@ -277,5 +303,25 @@ async def get_message_count(conversation_id: str) -> int:
     response.raise_for_status()
     result = response.json()
     return result.get("message_count", 0)
+
+
+async def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
+    """Get conversation details by ID"""
+    http_client = get_http_client()
+    
+    try:
+        response = await http_client.get(
+            f"{BACKEND_URL}/api/agent/conversations/{conversation_id}"
+        )
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 404:
+            return None
+        else:
+            response.raise_for_status()
+            return None
+    except Exception as e:
+        logger.error(f"Error getting conversation {conversation_id}: {e}")
+        return None
 
 

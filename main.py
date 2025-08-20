@@ -81,7 +81,10 @@ def is_simple_interaction(message: str) -> bool:
 
 @app.post("/chat")
 async def chat_with_agent(request: ChatRequest):
-    logger.info(f"📨 Incoming chat message: {request.message}")
+    if request.conversation_id:
+        logger.info(f"📨 Incoming chat message: {request.message} (continuing conversation: {request.conversation_id})")
+    else:
+        logger.info(f"📨 Incoming chat message: {request.message}")
     
     # Check if this is a simple interaction that doesn't need full agent processing
     if is_simple_interaction(request.message):
@@ -148,7 +151,8 @@ async def chat_with_agent(request: ChatRequest):
             # Phase 2: Start agent session with conversation and context loading
             conversation_id, existing_context = await state_manager.start_agent_session(
                 user_message=request.message,
-                case_id=case_id
+                case_id=case_id,
+                conversation_id=request.conversation_id
             )
             
             # Phase 3: Manage conversation length with intelligent summarization

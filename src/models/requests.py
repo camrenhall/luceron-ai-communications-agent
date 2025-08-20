@@ -8,6 +8,7 @@ from datetime import datetime
 
 class ChatRequest(BaseModel):
     message: str
+    conversation_id: Optional[str] = None
 
 
 class RequestedDocumentUpdate(BaseModel):

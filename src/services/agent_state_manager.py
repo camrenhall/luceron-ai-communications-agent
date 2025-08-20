@@ -31,7 +31,8 @@ class AgentStateManager:
     async def start_agent_session(
         self, 
         user_message: str,
-        case_id: Optional[str] = None
+        case_id: Optional[str] = None,
+        conversation_id: Optional[str] = None
     ) -> Tuple[str, Dict[str, Any]]:
         """
         Start a new agent session with conversation and context loading
@@ -42,7 +43,8 @@ class AgentStateManager:
         try:
             # Get or create conversation for this agent
             conversation_id = await get_or_create_conversation(
-                agent_type=self.agent_type
+                agent_type=self.agent_type,
+                conversation_id=conversation_id
             )
             
             logger.info(f"🎯 Started agent session: conversation={conversation_id}")

@@ -46,6 +46,7 @@ def create_communications_agent() -> AgentExecutor:
     
     prompt = ChatPromptTemplate.from_messages([
         SystemMessage(content=system_prompt),
+        MessagesPlaceholder("conversation_history", optional=True),
         ("human", "{input}"),
         MessagesPlaceholder("agent_scratchpad")
     ])

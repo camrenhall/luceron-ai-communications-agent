@@ -108,10 +108,19 @@ async def chat_with_agent(request: ChatRequest):
             
             agent = create_communications_agent()
             
-            # Enhanced agent input with context
+            # Extract and format conversation history from agent_context
+            conversation_messages = []
+            if agent_context.get("recent_conversation"):
+                for msg in agent_context["recent_conversation"]:
+                    if msg["role"] == "user":
+                        conversation_messages.append(("human", msg["content"].get("text", "")))
+                    elif msg["role"] == "assistant":
+                        conversation_messages.append(("assistant", msg["content"].get("text", "")))
+            
+            # Enhanced agent input with conversation history
             agent_input = {
                 "input": request.message,
-                "context": agent_context
+                "conversation_history": conversation_messages
             }
             
             result = await agent.ainvoke(

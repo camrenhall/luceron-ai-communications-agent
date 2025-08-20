@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class CreateCaseTool(BaseTool):
     name: str = "create_case"
-    description: str = "Create a new case for a client. Input: JSON with client_name, client_email, documents_requested (REQUIRED: string or array of document names), client_phone (optional)"
+    description: str = "Create a new case for a client. Input: JSON with client_name, client_email, requested_documents (REQUIRED: string or array of document names), client_phone (optional)"
     
     def _run(self, case_data: str) -> str:
         raise NotImplementedError("Use async version")
@@ -25,31 +25,31 @@ class CreateCaseTool(BaseTool):
             data = json.loads(case_data)
             client_name = data["client_name"]
             client_email = data["client_email"]
-            # documents_requested is REQUIRED - this is the core purpose of the platform
-            if "documents_requested" not in data:
-                raise Exception("documents_requested is required - this is a document collection platform!")
-            documents_requested = data["documents_requested"]
+            # requested_documents is REQUIRED - this is the core purpose of the platform
+            if "requested_documents" not in data:
+                raise Exception("requested_documents is required - this is a document collection platform!")
+            requested_documents = data["requested_documents"]
             client_phone = data.get("client_phone")
             
             logger.info(f"🆕 Creating new case for client: {client_name} ({client_email})")
             
-            # Process documents_requested - convert to standardized array format
-            if isinstance(documents_requested, str):
+            # Process requested_documents - convert to standardized array format
+            if isinstance(requested_documents, str):
                 # Split by common delimiters and clean up
-                doc_names = [doc.strip() for doc in documents_requested.replace(',', '\n').replace(';', '\n').split('\n') if doc.strip()]
-            elif isinstance(documents_requested, list):
-                doc_names = [str(doc).strip() for doc in documents_requested if str(doc).strip()]
+                doc_names = [doc.strip() for doc in requested_documents.replace(',', '\n').replace(';', '\n').split('\n') if doc.strip()]
+            elif isinstance(requested_documents, list):
+                doc_names = [str(doc).strip() for doc in requested_documents if str(doc).strip()]
             else:
-                doc_names = [str(documents_requested).strip()] if str(documents_requested).strip() else []
+                doc_names = [str(requested_documents).strip()] if str(requested_documents).strip() else []
             
             # Validate that we have at least one document
             if not doc_names:
                 raise Exception("At least one document must be requested - this is a document collection platform!")
             
             # Create requested documents array in the format expected by backend
-            requested_documents = []
+            requested_documents_payload = []
             for doc_name in doc_names:
-                requested_documents.append({
+                requested_documents_payload.append({
                     "document_name": doc_name,
                     "description": f"Required document: {doc_name}"
                 })
@@ -59,7 +59,7 @@ class CreateCaseTool(BaseTool):
                 "client_name": client_name,
                 "client_email": client_email,
                 "client_phone": client_phone,
-                "requested_documents": requested_documents
+                "requested_documents": requested_documents_payload
             }
             
             http_client = get_http_client()
@@ -84,7 +84,7 @@ class CreateCaseTool(BaseTool):
                 subject = template["subject_template"].format(client_name=client_name)
                 body = template["body_template"].format(
                     client_name=client_name,
-                    documents_requested=doc_list
+                    requested_documents=doc_list
                 )
                 
                 # Send email via backend
@@ -108,7 +108,7 @@ class CreateCaseTool(BaseTool):
                     "client_name": client_name,
                     "client_email": client_email,
                     "client_phone": client_phone,
-                    "requested_documents": requested_documents,
+                    "requested_documents": requested_documents_payload,
                     "email_sent": True,
                     "email_message_id": email_result.get("message_id")
                 }, indent=2)
@@ -120,7 +120,7 @@ class CreateCaseTool(BaseTool):
                     "client_name": client_name,
                     "client_email": client_email,
                     "client_phone": client_phone,
-                    "requested_documents": requested_documents,
+                    "requested_documents": requested_documents_payload,
                     "email_sent": False,
                     "warning": "No email template available"
                 }, indent=2)

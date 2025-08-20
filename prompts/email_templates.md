@@ -12,7 +12,7 @@ I hope this message finds you well. I am writing regarding your family law case.
 
 To move forward with your case, we need the following documents:
 
-{documents_requested}
+{requested_documents}
 
 Please provide these documents at your earliest convenience. You can:
 - Email them to this address
@@ -43,7 +43,7 @@ I wanted to follow up on my previous message regarding the documents needed for 
 
 As a reminder, we still need:
 
-{documents_requested}
+{requested_documents}
 
 We understand that gathering these documents can take time, but having them is essential for moving your case forward effectively.
 
@@ -71,7 +71,7 @@ This is an urgent follow-up regarding the outstanding documents needed for your 
 
 We have been waiting for the following critical documents:
 
-{documents_requested}
+{requested_documents}
 
 The delay in receiving these documents is now impacting our ability to represent you effectively. Time-sensitive deadlines in your case may be at risk.
 

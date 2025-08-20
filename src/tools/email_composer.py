@@ -92,7 +92,7 @@ class ComposeEmailTool(BaseTool):
             subject = template["subject_template"].format(client_name=case_data["client_name"])
             body = template["body_template"].format(
                 client_name=case_data["client_name"],
-                documents_requested=doc_list
+                requested_documents=doc_list
             )
             
             result = {

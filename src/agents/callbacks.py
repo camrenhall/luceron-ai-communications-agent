@@ -25,6 +25,7 @@ class ConversationCallbackHandler(BaseCallbackHandler):
         self.track_to_backend = track_to_backend
         self.active_tools: Dict[str, Dict[str, Any]] = {}  # tool tracking
         self.current_reasoning: Optional[str] = None
+        self.total_tokens: Optional[int] = None
         
     async def on_llm_start(self, serialized: Dict[str, Any], prompts: list, **kwargs):
         """Called when LLM starts processing"""
@@ -50,32 +51,14 @@ class ConversationCallbackHandler(BaseCallbackHandler):
         """Called when LLM finishes processing"""
         logger.info("✅ LLM processing completed")
         
-        # Extract token usage if available
-        total_tokens = None
+        # Extract token usage if available for potential use in final response
+        self.total_tokens = None
         if hasattr(response, 'llm_output') and response.llm_output:
             token_usage = response.llm_output.get('token_usage', {})
-            total_tokens = token_usage.get('total_tokens')
+            self.total_tokens = token_usage.get('total_tokens')
         
-        # Store LLM completion (this will be overridden by agent final response)
-        if self.track_to_backend:
-            try:
-                response_text = ""
-                if hasattr(response, 'generations') and response.generations:
-                    if hasattr(response.generations[0][0], 'text'):
-                        response_text = response.generations[0][0].text[:200] + "..."
-                
-                await add_message(
-                    conversation_id=self.conversation_id,
-                    role=MessageRole.ASSISTANT,
-                    content={
-                        "text": response_text if response_text else "Generated response",
-                        "stage": "completion"
-                    },
-                    model_used="claude-3-5-sonnet-20241022",
-                    total_tokens=total_tokens
-                )
-            except Exception as e:
-                logger.error(f"❌ Failed to store LLM end message: {e}")
+        # Note: We don't store a completion message here to avoid duplicates
+        # The final response will be stored via store_final_response() method
     
     async def on_agent_action(self, action: AgentAction, **kwargs):
         """Called when agent decides to take an action"""
@@ -202,7 +185,7 @@ class ConversationCallbackHandler(BaseCallbackHandler):
             except Exception as e:
                 logger.error(f"❌ Failed to store tool error message: {e}")
     
-    async def store_final_response(self, final_response: str, total_tokens: Optional[int] = None):
+    async def store_final_response(self, final_response: str):
         """Store the agent's final response to the user"""
         if self.track_to_backend:
             try:
@@ -215,7 +198,7 @@ class ConversationCallbackHandler(BaseCallbackHandler):
                         "response_length": len(final_response)
                     },
                     model_used="claude-3-5-sonnet-20241022",
-                    total_tokens=total_tokens
+                    total_tokens=self.total_tokens
                 )
                 logger.info(f"📝 Stored final response in conversation {self.conversation_id}")
             except Exception as e:

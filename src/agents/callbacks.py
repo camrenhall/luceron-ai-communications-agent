@@ -29,23 +29,8 @@ class ConversationCallbackHandler(BaseCallbackHandler):
         
     async def on_llm_start(self, serialized: Dict[str, Any], prompts: list, **kwargs):
         """Called when LLM starts processing"""
-        logger.info("🧠 LLM processing started")
-        
-        if self.track_to_backend and prompts:
-            # Store the reasoning/thinking phase
-            try:
-                await add_message(
-                    conversation_id=self.conversation_id,
-                    role=MessageRole.ASSISTANT,
-                    content={
-                        "text": "Processing request and planning actions...",
-                        "thinking": "Analyzing user input and determining appropriate tools to use",
-                        "stage": "reasoning"
-                    },
-                    model_used="claude-3-5-sonnet-20241022"
-                )
-            except Exception as e:
-                logger.error(f"❌ Failed to store LLM start message: {e}")
+        logger.info("🧠 LLM processing started - analyzing user input and determining appropriate tools to use")
+        # Note: Not storing to database to reduce bloat - debug info available in logs
     
     async def on_llm_end(self, response, **kwargs):
         """Called when LLM finishes processing"""
@@ -62,64 +47,26 @@ class ConversationCallbackHandler(BaseCallbackHandler):
     
     async def on_agent_action(self, action: AgentAction, **kwargs):
         """Called when agent decides to take an action"""
-        logger.info(f"🎯 Agent action: {action.tool} - {action.log[:100]}...")
+        logger.info(f"🎯 Agent action planned: {action.tool}")
+        logger.debug(f"Agent reasoning: {action.log[:200]}...")
         
-        # Store the reasoning behind this action
+        # Store the reasoning for potential use in final response
         self.current_reasoning = action.log
-        
-        if self.track_to_backend:
-            try:
-                await add_message(
-                    conversation_id=self.conversation_id,
-                    role=MessageRole.ASSISTANT,
-                    content={
-                        "text": f"I need to use {action.tool} to help with this request.",
-                        "reasoning": action.log,
-                        "planned_action": action.tool,
-                        "stage": "planning"
-                    },
-                    model_used="claude-3-5-sonnet-20241022"
-                )
-            except Exception as e:
-                logger.error(f"❌ Failed to store agent action message: {e}")
+        # Note: Not storing planning stage to database to reduce bloat - debug info available in logs
     
     async def on_tool_start(self, serialized, input_str, **kwargs):
         """Called when a tool starts execution"""
         tool_name = serialized.get('name', 'Unknown') if serialized else 'Unknown'
-        logger.info(f"🛠️ Starting tool: {tool_name}")
+        logger.info(f"🛠️ Executing tool: {tool_name}")
+        logger.debug(f"Tool input: {str(input_str)[:200]}...")
         
-        # Track tool start time and details
+        # Track tool start time and details for performance monitoring
         self.active_tools[tool_name] = {
             "start_time": time.time(),
             "input": input_str,
             "name": tool_name
         }
-        
-        if self.track_to_backend:
-            try:
-                # Parse tool input safely
-                tool_input = {}
-                if isinstance(input_str, str):
-                    tool_input = {"input": input_str}
-                elif isinstance(input_str, dict):
-                    tool_input = input_str
-                else:
-                    tool_input = {"input": str(input_str)}
-                
-                await add_message(
-                    conversation_id=self.conversation_id,
-                    role=MessageRole.ASSISTANT,
-                    content={
-                        "text": f"Executing {tool_name}...",
-                        "reasoning": self.current_reasoning or f"Using {tool_name} to process request",
-                        "stage": "execution"
-                    },
-                    function_name=tool_name,
-                    function_arguments=tool_input,
-                    model_used="claude-3-5-sonnet-20241022"
-                )
-            except Exception as e:
-                logger.error(f"❌ Failed to store tool start message: {e}")
+        # Note: Not storing execution stage to database to reduce bloat - debug info available in logs
     
     async def on_tool_end(self, output: str, **kwargs):
         """Called when a tool finishes execution"""
@@ -132,28 +79,9 @@ class ConversationCallbackHandler(BaseCallbackHandler):
             tool_name = "Unknown"
             execution_time_ms = None
         
-        logger.info(f"✅ Tool completed: {tool_name} (output length: {len(output) if output else 0})")
-        
-        if self.track_to_backend:
-            try:
-                # Truncate output for storage (keep it manageable)
-                truncated_output = output[:1000] + "..." if output and len(output) > 1000 else output
-                
-                await add_message(
-                    conversation_id=self.conversation_id,
-                    role=MessageRole.FUNCTION,
-                    content={
-                        "text": f"Tool {tool_name} completed successfully",
-                        "output_preview": truncated_output[:200] if truncated_output else None,
-                        "execution_time_ms": execution_time_ms,
-                        "output_length": len(output) if output else 0
-                    },
-                    function_name=tool_name,
-                    function_response={"output": truncated_output, "success": True},
-                    model_used="claude-3-5-sonnet-20241022"
-                )
-            except Exception as e:
-                logger.error(f"❌ Failed to store tool end message: {e}")
+        logger.info(f"✅ Tool completed: {tool_name} (output length: {len(output) if output else 0}, time: {execution_time_ms}ms)")
+        logger.debug(f"Tool output preview: {output[:200] if output else 'No output'}...")
+        # Note: Not storing tool completion to database to reduce bloat - debug info available in logs
     
     async def on_tool_error(self, error: Exception, **kwargs):
         """Called when a tool encounters an error"""
@@ -166,24 +94,8 @@ class ConversationCallbackHandler(BaseCallbackHandler):
             tool_name = "Unknown"
             execution_time_ms = None
         
-        logger.error(f"❌ Tool error: {tool_name} - {str(error)}")
-        
-        if self.track_to_backend:
-            try:
-                await add_message(
-                    conversation_id=self.conversation_id,
-                    role=MessageRole.FUNCTION,
-                    content={
-                        "text": f"Tool {tool_name} encountered an error",
-                        "error_message": str(error),
-                        "execution_time_ms": execution_time_ms
-                    },
-                    function_name=tool_name,
-                    function_response={"error": str(error), "success": False},
-                    model_used="claude-3-5-sonnet-20241022"
-                )
-            except Exception as e:
-                logger.error(f"❌ Failed to store tool error message: {e}")
+        logger.error(f"❌ Tool error: {tool_name} - {str(error)} (time: {execution_time_ms}ms)")
+        # Note: Not storing tool errors to database to reduce bloat - debug info available in logs
     
     async def store_final_response(self, final_response: str):
         """Store the agent's final response to the user"""

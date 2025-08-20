@@ -79,54 +79,75 @@ async def chat_with_agent(request: ChatRequest):
         from src.agents.communications import create_communications_agent
         
         try:
+            logger.info(f"🚀 Starting chat processing for message: '{request.message[:100]}...' with conversation_id: {request.conversation_id}")
+            
             # Initialize agent state manager
+            logger.info(f"🔧 Initializing AgentStateManager")
             state_manager = AgentStateManager()
+            logger.info(f"✅ AgentStateManager initialized successfully")
             
             # Phase 1: Determine case context (if possible from message)
+            logger.info(f"🔍 Phase 1: Extracting case_id from message")
             case_id = await _extract_case_id_from_message(request.message)
+            logger.info(f"✅ Phase 1 complete: case_id = {case_id}")
             
             # Phase 2: Start agent session with conversation and context loading
+            logger.info(f"🎯 Phase 2: Starting agent session")
             conversation_id, existing_context = await state_manager.start_agent_session(
                 user_message=request.message,
                 case_id=case_id,
                 conversation_id=request.conversation_id
             )
+            logger.info(f"✅ Phase 2 complete: conversation_id = {conversation_id}, context_keys = {list(existing_context.keys()) if existing_context else []}")
             
             # Phase 3: Manage conversation length with intelligent summarization
+            logger.info(f"📊 Phase 3: Managing conversation length")
             await state_manager.manage_conversation_length(conversation_id)
+            logger.info(f"✅ Phase 3 complete: Conversation length managed")
             
             # Phase 4: Prepare comprehensive agent context
+            logger.info(f"🧠 Phase 4: Preparing agent context")
             agent_context = await state_manager.prepare_agent_context(
                 conversation_id, existing_context
             )
+            logger.info(f"✅ Phase 4 complete: Agent context prepared with keys: {list(agent_context.keys())}")
             
             # Phase 5: Execute agent with conversation tracking and enhanced context
+            logger.info(f"🎭 Phase 5: Creating agent and preparing execution")
             callback_handler = ConversationCallbackHandler(
                 conversation_id=conversation_id,
                 track_to_backend=True
             )
             
             agent = create_communications_agent()
+            logger.info(f"✅ Communications agent created successfully")
             
             # Extract and format conversation history from agent_context
             conversation_messages = []
             if agent_context.get("recent_conversation"):
+                logger.info(f"📖 Extracting {len(agent_context['recent_conversation'])} messages from conversation history")
                 for msg in agent_context["recent_conversation"]:
                     if msg["role"] == "user":
                         conversation_messages.append(("human", msg["content"].get("text", "")))
                     elif msg["role"] == "assistant":
                         conversation_messages.append(("assistant", msg["content"].get("text", "")))
+                logger.info(f"✅ Formatted {len(conversation_messages)} conversation messages")
+            else:
+                logger.info(f"ℹ️ No recent conversation history found")
             
             # Enhanced agent input with conversation history
             agent_input = {
                 "input": request.message,
                 "conversation_history": conversation_messages
             }
+            logger.info(f"🎯 Agent input prepared with {len(conversation_messages)} history messages")
             
+            logger.info(f"🚀 Invoking agent with input...")
             result = await agent.ainvoke(
                 agent_input,
                 config={"callbacks": [callback_handler]}
             )
+            logger.info(f"✅ Agent execution completed successfully")
             
             # Phase 6: Extract and store final response
             final_response = _extract_agent_response(result)
@@ -157,6 +178,9 @@ async def chat_with_agent(request: ChatRequest):
                 
         except Exception as e:
             logger.error(f"❌ Agent execution failed: {e}")
+            logger.error(f"❌ Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"❌ Full traceback: {traceback.format_exc()}")
             error_data = {
                 'type': 'agent_error',
                 'timestamp': datetime.now().isoformat(),

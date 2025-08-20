@@ -41,15 +41,18 @@ class AgentStateManager:
             Tuple of (conversation_id, existing_context)
         """
         try:
+            logger.info(f"🚀 Starting agent session - user_message_length: {len(user_message)}, case_id: {case_id}, conversation_id: {conversation_id}")
+            
             # Get or create conversation for this agent
+            logger.info(f"📞 Calling get_or_create_conversation with agent_type={self.agent_type}, conversation_id={conversation_id}")
             conversation_id = await get_or_create_conversation(
                 agent_type=self.agent_type,
                 conversation_id=conversation_id
             )
-            
-            logger.info(f"🎯 Started agent session: conversation={conversation_id}")
+            logger.info(f"✅ Conversation established: {conversation_id}")
             
             # Add user message to conversation
+            logger.info(f"💾 Adding user message to conversation {conversation_id}")
             await add_message(
                 conversation_id=conversation_id,
                 role=MessageRole.USER,
@@ -60,20 +63,29 @@ class AgentStateManager:
                 },
                 model_used="claude-3-5-sonnet-20241022"
             )
+            logger.info(f"✅ User message added successfully")
             
             # Load existing context for this case/agent
             existing_context = {}
             if case_id:
                 try:
+                    logger.info(f"📚 Loading context for case_id: {case_id}, agent_type: {self.agent_type}")
                     existing_context = await get_case_agent_context(case_id, self.agent_type)
-                    logger.info(f"📚 Loaded context keys: {list(existing_context.keys())}")
+                    logger.info(f"✅ Loaded context keys: {list(existing_context.keys())}")
                 except Exception as e:
-                    logger.info(f"No existing context for case {case_id}: {e}")
+                    logger.info(f"ℹ️ No existing context for case {case_id}: {e}")
+            else:
+                logger.info(f"ℹ️ No case_id provided, skipping context loading")
             
+            logger.info(f"🎯 Agent session started successfully: conversation={conversation_id}, context_keys={list(existing_context.keys())}")
             return conversation_id, existing_context
             
         except Exception as e:
-            logger.error(f"Failed to start agent session: {e}")
+            logger.error(f"❌ Failed to start agent session: {e}")
+            logger.error(f"❌ Error type: {type(e).__name__}")
+            logger.error(f"❌ Error details: user_message_length={len(user_message) if user_message else 'None'}, case_id={case_id}, conversation_id={conversation_id}")
+            import traceback
+            logger.error(f"❌ Full traceback: {traceback.format_exc()}")
             raise
     
     async def manage_conversation_length(self, conversation_id: str, threshold: int = 20) -> Dict[str, Any]:

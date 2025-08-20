@@ -40,13 +40,12 @@ class AgentStateManager:
             Tuple of (conversation_id, existing_context)
         """
         try:
-            # Get or create conversation for this case/agent
+            # Get or create conversation for this agent
             conversation_id = await get_or_create_conversation(
-                case_id=case_id or "general",
                 agent_type=self.agent_type
             )
             
-            logger.info(f"🎯 Started agent session: conversation={conversation_id}, case={case_id}")
+            logger.info(f"🎯 Started agent session: conversation={conversation_id}")
             
             # Add user message to conversation
             await add_message(
@@ -171,7 +170,7 @@ class AgentStateManager:
         agent_result: Dict[str, Any]
     ) -> None:
         """Store important findings and interactions in case context"""
-        if not case_id or case_id == "general":
+        if not case_id:
             return
         
         try:
@@ -276,3 +275,4 @@ class AgentStateManager:
         except Exception as e:
             logger.error(f"Failed to get conversation metrics: {e}")
             return {"message_count": 0, "has_summary": False}
+    

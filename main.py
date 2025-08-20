@@ -66,9 +66,73 @@ async def status_check():
     return {"status": "running", "service": "communications-agent"}
 
 
+def is_simple_interaction(message: str) -> bool:
+    """Detect if message is a simple greeting or casual interaction that doesn't need full agent processing"""
+    simple_patterns = [
+        "hello", "hi", "hey", "good morning", "good afternoon", "good evening",
+        "how are you", "how's it going", "what's up", "thanks", "thank you",
+        "bye", "goodbye", "see you", "have a good day", "nice to meet you"
+    ]
+    message_lower = message.lower().strip()
+    
+    # Check for exact matches or simple variations
+    return any(pattern in message_lower for pattern in simple_patterns) and len(message.split()) <= 6
+
+
 @app.post("/chat")
 async def chat_with_agent(request: ChatRequest):
     logger.info(f"📨 Incoming chat message: {request.message}")
+    
+    # Check if this is a simple interaction that doesn't need full agent processing
+    if is_simple_interaction(request.message):
+        logger.info("🤝 Detected simple interaction, using lightweight response")
+        
+        async def generate_simple_response():
+            """Generate a simple response without backend state management"""
+            from src.agents.communications import create_communications_agent
+            
+            try:
+                # Create agent but run in lightweight mode
+                agent = create_communications_agent()
+                
+                # Simple agent input without context
+                agent_input = {"input": request.message}
+                
+                result = await agent.ainvoke(agent_input)
+                
+                # Extract response
+                final_response = _extract_agent_response(result)
+                
+                logger.info(f"✅ Simple response completed: {len(final_response)} chars")
+                
+                # Send simple response event
+                response_data = {
+                    'type': 'agent_response',
+                    'timestamp': datetime.now().isoformat(),
+                    'response': final_response,
+                    'mode': 'lightweight'
+                }
+                yield f"data: {json.dumps(response_data)}\n\n"
+                    
+            except Exception as e:
+                logger.error(f"❌ Simple response failed: {e}")
+                error_data = {
+                    'type': 'agent_error',
+                    'timestamp': datetime.now().isoformat(),
+                    'error_message': str(e),
+                    'mode': 'lightweight'
+                }
+                yield f"data: {json.dumps(error_data)}\n\n"
+        
+        return StreamingResponse(
+            generate_simple_response(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
     
     async def generate_stateful_response():
         """Generate response with conversation tracking and context awareness"""

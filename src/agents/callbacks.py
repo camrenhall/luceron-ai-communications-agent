@@ -1,6 +1,7 @@
 """
 Agent callback handlers for conversation tracking
 """
+import json
 import logging
 import time
 from datetime import datetime
@@ -10,6 +11,8 @@ from langchain_core.agents import AgentAction
 
 from src.services.backend_api import add_message
 from src.models.agent_state import MessageRole
+from src.config.settings import BACKEND_URL
+from src.services.http_client import get_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +220,7 @@ class ConversationCallbackHandler(BaseCallbackHandler):
                 logger.info(f"📝 Stored final response in conversation {self.conversation_id}")
             except Exception as e:
                 logger.error(f"❌ Failed to store final response: {e}")
-
+    
 
 # Legacy handler for backwards compatibility
 class SimpleCallbackHandler(ConversationCallbackHandler):

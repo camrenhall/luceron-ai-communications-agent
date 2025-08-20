@@ -74,12 +74,11 @@ async def search_cases_by_name(
 # Agent Conversations API
 # ============================================================================
 
-async def create_conversation(case_id: str, agent_type: str = "CommunicationsAgent", status: str = "ACTIVE") -> Dict[str, Any]:
+async def create_conversation(agent_type: str = "CommunicationsAgent", status: str = "ACTIVE") -> Dict[str, Any]:
     """Create a new agent conversation for state tracking"""
     http_client = get_http_client()
     
     conversation_data = {
-        "case_id": case_id,
         "agent_type": agent_type,
         "status": status
     }
@@ -113,29 +112,13 @@ async def get_conversation_with_messages(
     return response.json()
 
 
-async def get_or_create_conversation(case_id: str, agent_type: str = "CommunicationsAgent") -> str:
-    """Get existing active conversation or create new one for case/agent"""
+async def get_or_create_conversation(agent_type: str = "CommunicationsAgent") -> str:
+    """Get existing active conversation or create new one for agent"""
     http_client = get_http_client()
     
-    # First try to find existing active conversation
-    search_params = {
-        "case_id": case_id,
-        "agent_type": agent_type,
-        "status": "ACTIVE"
-    }
-    
-    response = await http_client.get(
-        f"{BACKEND_URL}/api/agent/conversations/search",
-        params=search_params
-    )
-    
-    if response.status_code == 200:
-        conversations = response.json()
-        if conversations and len(conversations) > 0:
-            return conversations[0]["conversation_id"]
-    
-    # No existing conversation found, create new one
-    new_conversation = await create_conversation(case_id, agent_type)
+    # For now, always create a new conversation
+    # In the future, could implement conversation reuse logic if needed
+    new_conversation = await create_conversation(agent_type)
     return new_conversation["conversation_id"]
 
 
@@ -294,3 +277,5 @@ async def get_message_count(conversation_id: str) -> int:
     response.raise_for_status()
     result = response.json()
     return result.get("message_count", 0)
+
+

@@ -124,26 +124,28 @@ async def get_or_create_conversation(
     
     # If conversation_id is provided, validate it exists and is active
     if conversation_id:
-        try:
-            response = await http_client.get(
-                f"{BACKEND_URL}/api/agent/conversations/{conversation_id}"
-            )
-            if response.status_code == 200:
-                conversation = response.json()
-                # Verify conversation is active and matches agent type
-                if conversation.get("status") == "ACTIVE" and conversation.get("agent_type") == agent_type:
-                    return conversation_id
-                else:
-                    # Conversation exists but is inactive or wrong agent type
-                    raise ValueError(f"Conversation {conversation_id} is not active or does not match agent type {agent_type}")
-            else:
-                # Conversation doesn't exist
-                raise ValueError(f"Conversation {conversation_id} not found")
-        except Exception as e:
-            # If there's any error with the provided conversation_id, create a new one
-            print(f"Warning: Could not use conversation {conversation_id}: {e}")
+        response = await http_client.get(
+            f"{BACKEND_URL}/api/agent/conversations/{conversation_id}"
+        )
+        
+        if response.status_code == 404:
+            raise ValueError(f"Conversation {conversation_id} not found")
+        elif response.status_code != 200:
+            response.raise_for_status()  # This will raise the HTTP error
+            
+        conversation = response.json()
+        
+        # Verify conversation is active and matches agent type
+        if conversation.get("status") != "ACTIVE":
+            raise ValueError(f"Conversation {conversation_id} is not active (status: {conversation.get('status')})")
+        
+        if conversation.get("agent_type") != agent_type:
+            raise ValueError(f"Conversation {conversation_id} agent type mismatch. Expected: {agent_type}, Got: {conversation.get('agent_type')}")
+        
+        # Conversation is valid, return it
+        return conversation_id
     
-    # Create new conversation if no ID provided or existing one is invalid
+    # Only create new conversation if no conversation_id was provided
     new_conversation = await create_conversation(agent_type)
     return new_conversation["conversation_id"]
 

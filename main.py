@@ -207,9 +207,6 @@ async def chat_with_agent(request: ChatRequest):
 
 async def _extract_case_id_from_message(message: str) -> Optional[str]:
     """Extract case_id from user message using basic heuristics"""
-    # TODO: Implement more sophisticated case_id extraction
-    # For now, let the agent's tools handle case lookup dynamically
-    # This could be enhanced to use NLP to detect case references
     return None
 
 

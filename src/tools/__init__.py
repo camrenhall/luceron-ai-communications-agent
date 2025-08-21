@@ -1,9 +1,6 @@
 """
 LangChain tools implementation
 """
-from .case_analysis import GetCaseAnalysisTool
-from .email_composer import ComposeEmailTool
-from .email_sender import SendEmailTool
-from .case_creator import CreateCaseTool
+from .email_tool import EmailTool
 
-__all__ = ["GetCaseAnalysisTool", "ComposeEmailTool", "SendEmailTool", "CreateCaseTool"]
+__all__ = ["EmailTool"]

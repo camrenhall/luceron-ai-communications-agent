@@ -1,5 +1,5 @@
 """
-Email composer tool implementation
+Consolidated email tool that handles both composition and sending
 """
 import json
 import logging
@@ -13,9 +13,9 @@ from src.services.backend_api import get_case_with_documents
 logger = logging.getLogger(__name__)
 
 
-class ComposeEmailTool(BaseTool):
-    name: str = "compose_email"
-    description: str = "Compose email based on case context. Input: JSON with case_id, email_type (use: initial_reminder, follow_up_reminder, or urgent_reminder)"
+class EmailTool(BaseTool):
+    name: str = "compose_and_send_email"
+    description: str = "Compose and send email based on case context. Input: JSON with case_id, email_type (use: initial_reminder, follow_up_reminder, or urgent_reminder)"
     
     def _run(self, email_data: str) -> str:
         raise NotImplementedError("Use async version")
@@ -34,8 +34,9 @@ class ComposeEmailTool(BaseTool):
             elif email_type in ["urgent", "urgent_request"]:
                 email_type = "urgent_reminder"
             
-            logger.info(f"✍️ Composing {email_type} email for case {case_id}")
+            logger.info(f"✍️ Composing and sending {email_type} email for case {case_id}")
             
+            # COMPOSE EMAIL
             # Get case data with enhanced document information
             case_data = await get_case_with_documents(case_id)
             
@@ -94,20 +95,36 @@ class ComposeEmailTool(BaseTool):
                 requested_documents=doc_list
             )
             
-            result = {
+            email_payload = {
+                "recipient_email": case_data["client_email"],
                 "subject": subject,
                 "body": body,
-                "html_body": body.replace("\n", "<br>"),
-                "recipient": case_data["client_email"],
                 "case_id": case_id,
                 "email_type": email_type
             }
             
             logger.info(f"✍️ Successfully composed {email_type} email for {case_data['client_name']}")
             
-            return json.dumps(result, indent=2)
+            # SEND EMAIL
+            logger.info(f"📧 Sending {email_type} email to {case_data['client_name']} at {case_data['client_email']}")
+            
+            http_client = get_http_client()
+            response = await http_client.post(f"{BACKEND_URL}/api/send-email", json=email_payload)
+            response.raise_for_status()
+            result = response.json()
+            
+            logger.info(f"📧 Successfully sent {email_type} email to {case_data['client_name']} (Message ID: {result.get('message_id', 'N/A')})")
+            
+            return json.dumps({
+                "status": "composed_and_sent",
+                "message_id": result["message_id"],
+                "recipient": result["recipient"],
+                "subject": subject,
+                "email_type": email_type,
+                "case_id": case_id
+            }, indent=2)
             
         except Exception as e:
-            error_msg = f"Email composition failed: {str(e)}"
-            logger.error(f"✍️ Composition ERROR: {error_msg}")
+            error_msg = f"Email composition and sending failed: {str(e)}"
+            logger.error(f"📧 Email ERROR: {error_msg}")
             raise Exception(error_msg)

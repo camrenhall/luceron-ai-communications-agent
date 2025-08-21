@@ -8,17 +8,7 @@ from langchain_core.messages import SystemMessage
 
 from src.config.settings import ANTHROPIC_API_KEY
 from src.services.prompt_loader import load_prompt
-from src.tools.case_analysis import GetCaseAnalysisTool
-from src.tools.case_lookup import IntelligentCaseLookupTool
-from src.tools.case_verification import VerifyCaseDetailsTool, RequestClarificationTool
-from src.tools.email_composer import ComposeEmailTool
-from src.tools.email_sender import SendEmailTool
-from src.tools.case_creator import CreateCaseTool
-from src.tools.document_manager import (
-    UpdateDocumentStatusTool,
-    GetDocumentStatusTool,
-    GetPendingRemindersTool
-)
+from src.tools.email_tool import EmailTool
 
 
 def create_communications_agent() -> AgentExecutor:
@@ -30,16 +20,7 @@ def create_communications_agent() -> AgentExecutor:
     )
     
     tools = [
-        IntelligentCaseLookupTool(),
-        GetCaseAnalysisTool(),
-        VerifyCaseDetailsTool(),
-        RequestClarificationTool(),
-        ComposeEmailTool(),
-        SendEmailTool(),
-        CreateCaseTool(),
-        UpdateDocumentStatusTool(),
-        GetDocumentStatusTool(),
-        GetPendingRemindersTool()
+        EmailTool()
     ]
     
     system_prompt = load_prompt("enhanced_communications_system_prompt.md")

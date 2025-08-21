@@ -30,7 +30,6 @@ class ConversationCallbackHandler(BaseCallbackHandler):
     async def on_llm_start(self, serialized: Dict[str, Any], prompts: list, **kwargs):
         """Called when LLM starts processing"""
         logger.info("🧠 LLM processing started - analyzing user input and determining appropriate tools to use")
-        # Note: Not storing to database to reduce bloat - debug info available in logs
     
     async def on_llm_end(self, response, **kwargs):
         """Called when LLM finishes processing"""
@@ -42,17 +41,13 @@ class ConversationCallbackHandler(BaseCallbackHandler):
             token_usage = response.llm_output.get('token_usage', {})
             self.total_tokens = token_usage.get('total_tokens')
         
-        # Note: We don't store a completion message here to avoid duplicates
-        # The final response will be stored via store_final_response() method
     
     async def on_agent_action(self, action: AgentAction, **kwargs):
         """Called when agent decides to take an action"""
         logger.info(f"🎯 Agent action planned: {action.tool}")
         logger.debug(f"Agent reasoning: {action.log[:200]}...")
         
-        # Store the reasoning for potential use in final response
         self.current_reasoning = action.log
-        # Note: Not storing planning stage to database to reduce bloat - debug info available in logs
     
     async def on_tool_start(self, serialized, input_str, **kwargs):
         """Called when a tool starts execution"""
@@ -60,13 +55,11 @@ class ConversationCallbackHandler(BaseCallbackHandler):
         logger.info(f"🛠️ Executing tool: {tool_name}")
         logger.debug(f"Tool input: {str(input_str)[:200]}...")
         
-        # Track tool start time and details for performance monitoring
         self.active_tools[tool_name] = {
             "start_time": time.time(),
             "input": input_str,
             "name": tool_name
         }
-        # Note: Not storing execution stage to database to reduce bloat - debug info available in logs
     
     async def on_tool_end(self, output: str, **kwargs):
         """Called when a tool finishes execution"""
@@ -81,7 +74,6 @@ class ConversationCallbackHandler(BaseCallbackHandler):
         
         logger.info(f"✅ Tool completed: {tool_name} (output length: {len(output) if output else 0}, time: {execution_time_ms}ms)")
         logger.debug(f"Tool output preview: {output[:200] if output else 'No output'}...")
-        # Note: Not storing tool completion to database to reduce bloat - debug info available in logs
     
     async def on_tool_error(self, error: Exception, **kwargs):
         """Called when a tool encounters an error"""
@@ -95,7 +87,6 @@ class ConversationCallbackHandler(BaseCallbackHandler):
             execution_time_ms = None
         
         logger.error(f"❌ Tool error: {tool_name} - {str(error)} (time: {execution_time_ms}ms)")
-        # Note: Not storing tool errors to database to reduce bloat - debug info available in logs
     
     async def store_final_response(self, final_response: str):
         """Store the agent's final response to the user"""
@@ -116,11 +107,3 @@ class ConversationCallbackHandler(BaseCallbackHandler):
             except Exception as e:
                 logger.error(f"❌ Failed to store final response: {e}")
     
-
-# Legacy handler for backwards compatibility
-class SimpleCallbackHandler(ConversationCallbackHandler):
-    """Simple callback handler that logs but doesn't track to backend"""
-    
-    def __init__(self):
-        super().__init__(conversation_id="", track_to_backend=False)
-        logger.warning("⚠️ Using legacy SimpleCallbackHandler - consider upgrading to ConversationCallbackHandler")

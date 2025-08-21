@@ -5,7 +5,6 @@ import json
 import logging
 import sys
 import os
-import uuid
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
@@ -19,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.config.settings import PORT, BACKEND_URL
 from src.models.requests import ChatRequest
-from src.models.agent_state import MessageRole, AgentType
+from src.models.agent_state import MessageRole
 from src.services.http_client import init_http_client, close_http_client, get_http_client
 from src.services.agent_state_manager import AgentStateManager
 from src.agents.callbacks import ConversationCallbackHandler

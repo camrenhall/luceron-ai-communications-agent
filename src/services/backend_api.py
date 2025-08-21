@@ -22,46 +22,6 @@ async def get_case_with_documents(case_id: str) -> Dict[str, Any]:
 
 
 
-
-
-
-async def get_pending_reminders() -> List[Dict[str, Any]]:
-    """Get cases that need reminder emails"""
-    http_client = get_http_client()
-    response = await http_client.get(f"{BACKEND_URL}/api/cases/pending-reminders")
-    response.raise_for_status()
-    return response.json()
-
-
-async def search_cases_by_name(
-    client_name: str, 
-    status: Optional[str] = "OPEN",
-    use_fuzzy: bool = True,
-    fuzzy_threshold: float = 0.3,
-    limit: int = 50
-) -> List[Dict[str, Any]]:
-    """Search for cases by client name with intelligent fuzzy matching"""
-    http_client = get_http_client()
-    
-    search_payload = {
-        "client_name": client_name,
-        "use_fuzzy_matching": use_fuzzy,
-        "fuzzy_threshold": fuzzy_threshold,
-        "limit": limit
-    }
-    
-    if status:
-        search_payload["status"] = status
-    
-    response = await http_client.post(
-        f"{BACKEND_URL}/api/cases/search",
-        json=search_payload
-    )
-    response.raise_for_status()
-    result = response.json()
-    return result.get("cases", [])
-
-
 # Agent State Management API Functions
 
 # ============================================================================
@@ -80,27 +40,6 @@ async def create_conversation(agent_type: str = "CommunicationsAgent", status: s
     response = await http_client.post(
         f"{BACKEND_URL}/api/agent/conversations",
         json=conversation_data
-    )
-    response.raise_for_status()
-    return response.json()
-
-
-async def get_conversation_with_messages(
-    conversation_id: str, 
-    include_summaries: bool = True,
-    include_function_calls: bool = True
-) -> Dict[str, Any]:
-    """Get conversation with full message history and summaries"""
-    http_client = get_http_client()
-    
-    params = {
-        "include_summaries": str(include_summaries).lower(),
-        "include_function_calls": str(include_function_calls).lower()
-    }
-    
-    response = await http_client.get(
-        f"{BACKEND_URL}/api/agent/conversations/{conversation_id}/full",
-        params=params
     )
     response.raise_for_status()
     return response.json()
@@ -296,25 +235,5 @@ async def get_message_count(conversation_id: str) -> int:
     response.raise_for_status()
     result = response.json()
     return result.get("message_count", 0)
-
-
-async def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
-    """Get conversation details by ID"""
-    http_client = get_http_client()
-    
-    try:
-        response = await http_client.get(
-            f"{BACKEND_URL}/api/agent/conversations/{conversation_id}"
-        )
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 404:
-            return None
-        else:
-            response.raise_for_status()
-            return None
-    except Exception as e:
-        logger.error(f"Error getting conversation {conversation_id}: {e}")
-        return None
 
 

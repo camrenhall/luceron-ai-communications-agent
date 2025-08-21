@@ -7,12 +7,6 @@ from enum import Enum
 from pydantic import BaseModel
 
 
-class ConversationStatus(str, Enum):
-    ACTIVE = "ACTIVE"
-    COMPLETED = "COMPLETED"
-    ARCHIVED = "ARCHIVED"
-
-
 class MessageRole(str, Enum):
     SYSTEM = "system"
     USER = "user" 
@@ -25,64 +19,6 @@ class AgentType(str, Enum):
     ANALYSIS_AGENT = "AnalysisAgent"
 
 
-class AgentConversation(BaseModel):
-    """Agent conversation for state tracking"""
-    conversation_id: str
-    case_id: str
-    agent_type: AgentType
-    status: ConversationStatus
-    total_tokens_used: int = 0
-    created_at: datetime
-    updated_at: datetime
-
-
-class AgentMessage(BaseModel):
-    """Message within an agent conversation"""
-    message_id: str
-    conversation_id: str
-    role: MessageRole
-    content: Dict[str, Any]
-    sequence_number: int
-    total_tokens: Optional[int] = None
-    model_used: str = "claude-3-5-sonnet-20241022"
-    
-    # Function call details
-    function_name: Optional[str] = None
-    function_arguments: Optional[Dict[str, Any]] = None
-    function_response: Optional[Dict[str, Any]] = None
-    
-    created_at: datetime
-
-
-class AgentContext(BaseModel):
-    """Persistent context storage for agents"""
-    context_id: str
-    case_id: str
-    agent_type: AgentType
-    context_key: str
-    context_value: Dict[str, Any]
-    expires_at: Optional[datetime] = None
-    created_at: datetime
-    updated_at: datetime
-
-
-class AgentSummary(BaseModel):
-    """Conversation summary for token management"""
-    summary_id: str
-    conversation_id: str
-    summary_content: str
-    messages_summarized: int
-    tokens_saved: Optional[int] = None
-    created_at: datetime
-
-
-class ConversationWithMessages(BaseModel):
-    """Complete conversation with messages and summaries"""
-    conversation: AgentConversation
-    messages: List[AgentMessage]
-    summaries: List[AgentSummary] = []
-
-
 # Context value schemas for type safety
 class ClientPreferences(BaseModel):
     """Client communication preferences context"""
@@ -92,16 +28,6 @@ class ClientPreferences(BaseModel):
     language_preference: str = "English"
     document_format_preference: str = "PDF"
     urgency_threshold: Literal["low", "medium", "high"] = "medium"
-
-
-class DocumentFindings(BaseModel):
-    """Document analysis findings context"""
-    document_type: str
-    key_findings: Dict[str, Any]
-    risk_factors: List[str] = []
-    analysis_confidence: float
-    analysis_date: datetime
-    reviewer_notes: Optional[str] = None
 
 
 class EmailHistory(BaseModel):

@@ -48,45 +48,8 @@ class EmailTool(BaseTool):
             
             template = templates[email_type]
             
-            # Format documents list for email with enhanced context
-            requested_docs = case_data.get("requested_documents", [])
-            if requested_docs:
-                # Enhanced document formatting with completion status
-                doc_lines = []
-                pending_docs = []
-                completed_docs = []
-                
-                for doc in requested_docs:
-                    if isinstance(doc, dict):
-                        doc_name = doc.get('document_name', 'Unknown Document')
-                        is_completed = doc.get('is_completed', False)
-                        description = doc.get('description', '')
-                        
-                        if is_completed:
-                            completed_docs.append(doc_name)
-                        else:
-                            pending_docs.append(doc_name)
-                            # Add description if available for pending documents
-                            if description and description != f"Required document: {doc_name}":
-                                doc_lines.append(f"• {doc_name} - {description}")
-                            else:
-                                doc_lines.append(f"• {doc_name}")
-                    else:
-                        # Fallback for string format
-                        pending_docs.append(str(doc))
-                        doc_lines.append(f"• {doc}")
-                
-                # Create contextual document list based on email type
-                if email_type in ["follow_up_reminder", "urgent_reminder"] and completed_docs:
-                    # For follow-up emails, focus on remaining documents
-                    doc_list = "\n".join(doc_lines)
-                    if completed_docs:
-                        doc_list += f"\n\nThank you for already providing: {', '.join(completed_docs)}"
-                else:
-                    # For initial emails, show all requested documents
-                    doc_list = "\n".join(doc_lines) if doc_lines else "\n".join([f"• {doc}" for doc in pending_docs])
-            else:
-                doc_list = "No specific documents listed"
+            # Document functionality has been removed from the backend
+            doc_list = "Please refer to your case for document requirements"
             
             # Format email
             subject = template["subject_template"].format(client_name=case_data["client_name"])

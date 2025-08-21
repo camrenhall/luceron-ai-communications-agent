@@ -11,25 +11,16 @@ from src.services.http_client import get_http_client
 logger = logging.getLogger(__name__)
 
 
-# Requested Documents API Functions
+# Case API Functions
 
 async def get_case_with_documents(case_id: str) -> Dict[str, Any]:
-    """Get case details including requested documents from the backend"""
+    """Get case details from the backend"""
     http_client = get_http_client()
     response = await http_client.get(f"{BACKEND_URL}/api/cases/{case_id}")
     response.raise_for_status()
     return response.json()
 
 
-async def update_requested_document(requested_doc_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
-    """Update a requested document using the backend API"""
-    http_client = get_http_client()
-    response = await http_client.put(
-        f"{BACKEND_URL}/api/cases/documents/{requested_doc_id}",
-        json=updates
-    )
-    response.raise_for_status()
-    return response.json()
 
 
 

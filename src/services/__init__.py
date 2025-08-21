@@ -10,7 +10,7 @@ from .backend_api import (
     store_agent_context, get_case_agent_context,
     create_auto_summary, get_latest_summary, get_message_count,
     # Case Management  
-    get_case_with_documents, search_cases_by_name, update_requested_document,
+    get_case_with_documents, search_cases_by_name,
     get_pending_reminders
 )
 from .agent_state_manager import AgentStateManager
@@ -28,6 +28,6 @@ __all__ = [
     "create_auto_summary", "get_latest_summary", "get_message_count",
     "AgentStateManager", "TokenManager",
     # Case Management
-    "get_case_with_documents", "search_cases_by_name", "update_requested_document",
+    "get_case_with_documents", "search_cases_by_name",
     "get_pending_reminders"
 ]

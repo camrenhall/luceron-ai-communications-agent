@@ -197,8 +197,7 @@ docker run -p 8082:8082 \
 The agent uses markdown templates in the `prompts/` directory:
 
 - `enhanced_communications_system_prompt.md` - Primary agent instructions and business rules
-- `email_templates.md` - Email composition templates (initial, follow-up, urgent)  
-- `clarification_templates.md` - User clarification request templates
+- `email_templates.md` - Email composition templates (initial, follow-up, urgent)
 
 ### Current Features
 

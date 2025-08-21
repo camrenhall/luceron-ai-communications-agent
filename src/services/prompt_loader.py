@@ -6,14 +6,24 @@ from typing import Dict
 
 
 def load_prompt(filename: str) -> str:
-    """Load prompt from markdown file"""
+    """Load prompt from markdown file with hard failure on error"""
     prompt_path = os.path.join("prompts", filename)
-    with open(prompt_path, 'r', encoding='utf-8') as f:
-        return f.read().strip()
+    try:
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+            if not content:
+                raise ValueError(f"Prompt file '{filename}' is empty. No fallback available.")
+            return content
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Prompt file not found: {prompt_path}. No fallback available.")
+    except ValueError:
+        raise  # Re-raise ValueError as-is
+    except Exception as e:
+        raise RuntimeError(f"Failed to load prompt from '{prompt_path}': {e}. No fallback available.")
 
 
 def load_email_templates() -> Dict[str, Dict[str, str]]:
-    """Load email templates from markdown file"""
+    """Load email templates from markdown file with hard failure on error"""
     template_content = load_prompt("email_templates.md")
     
     # Simple parsing - extract templates between ## headers

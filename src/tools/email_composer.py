@@ -43,8 +43,7 @@ class ComposeEmailTool(BaseTool):
             templates = load_email_templates()
             
             if email_type not in templates:
-                # Default to initial_reminder if type not found
-                email_type = "initial_reminder"
+                raise ValueError(f"Email template '{email_type}' not found in prompts/email_templates.md. Available templates: {list(templates.keys())}")
             
             template = templates[email_type]
             

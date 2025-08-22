@@ -6,3 +6,6 @@ langchain
 langchain-anthropic
 langchain-core
 python-multipart
+cryptography
+PyJWT
+requests

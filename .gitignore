@@ -205,3 +205,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Luceron OAuth2 Configuration (contains private keys)
+config/luceron_config.json
+*.pem
+*.key

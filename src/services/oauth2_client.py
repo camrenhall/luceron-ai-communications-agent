@@ -28,8 +28,10 @@ class LuceronClient:
         
         # Load private key
         try:
+            # Handle environment variables that may have escaped newlines
+            processed_key = private_key_pem.replace('\\n', '\n')
             self.private_key = serialization.load_pem_private_key(
-                private_key_pem.encode(),
+                processed_key.encode(),
                 password=None
             )
         except Exception as e:
